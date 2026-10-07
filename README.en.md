@@ -2,17 +2,10 @@
 
 > English summary. The Chinese [`README.md`](README.md) is the primary one, and all
 > other documents are in Chinese.
->
-> Since October 2026 this repository has moved from "post-training a web-novel
-> reranker with SFT + GRPO" to "a web-novel conversational agent plus an agent
-> evaluation suite". The design and every decision with its alternatives are in
-> [`docs/agent-plan.md`](docs/agent-plan.md). The previous system is fully
-> described in [`docs/v1-reranker/`](docs/v1-reranker/README.md) and its code
-> is at tag `v1-reranker`.
 
 Corpus: 7,653 Chinese web novels, about 36 GB of plain text, private, not in git.
 
-## What is here now
+## Repository layout
 
 | path | contents |
 |---|---|
@@ -21,8 +14,8 @@ Corpus: 7,653 Chinese web novels, about 36 GB of plain text, private, not in git
 | `src/retrieval/` | multi-vector book index, in-house BM25 over jieba tokens, reciprocal-rank hybrid, and the retrieval benchmark |
 | `scripts/` | 01–03 corpus, profiles, index; 10–12 annotation and splits; 15–16 rule blind-spot table and term-density table; 30–31 build book indexes and run the retrieval benchmark |
 | `eval/` | the frozen v1 queries, human annotations, and under `eval/results/` the judged rows of every v1 arm |
-| `docs/agent-plan.md` | the agent design: goals and trade-offs, architecture, evaluation, phases |
-| `docs/v1-reranker/` | the previous system's README, architecture and evaluation notes |
+| `docs/agent-plan.md` | the design document: goals and trade-offs, architecture, evaluation, phases |
+| `docs/v1-reranker/` | the reranker post-training work (SFT + GRPO): method, notes and results |
 
 Retrieval and RAG are the technical core: the corpus is raw text with no tags or
 metadata, so every structured signal has to be extracted at index time. The agent
