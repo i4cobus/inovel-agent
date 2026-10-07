@@ -58,12 +58,18 @@ def judge_chapter_indices(
     chapters: Sequence[Any],
     windows: int = DEFAULT_WINDOWS,
     profile_samples: int = DEFAULT_CHAPTER_SAMPLES,
+    seed_salt: str = "",
 ) -> list[int]:
     """Pick chapters for the judge, excluding the ones the profile sampled.
 
     Both sides filter to *substantive* chapters first, so a table-of-contents
     heading can never be handed to the judge as evidence, and the disjointness
     guarantee holds against the same view the profile used.
+
+    ``seed_salt`` lets a second sampler (the agent's ``check_trope`` tool) draw
+    different chapters from the same bands, so the tool and the judge are not
+    reading the same text. Different, not guaranteed disjoint: both pick one
+    chapter per band, and a band with few chapters can collide.
     """
 
     usable = substantive_chapter_indices(chapters)
@@ -81,7 +87,7 @@ def judge_chapter_indices(
     for slot in range(count):
         band_start = int(slot * len(available) / count)
         band_end = max(int((slot + 1) * len(available) / count), band_start + 1)
-        offset = int(stable_unit_float(f"{novel_id}:{slot}") * (band_end - band_start))
+        offset = int(stable_unit_float(f"{seed_salt}{novel_id}:{slot}") * (band_end - band_start))
         picked.append(available[min(band_start + offset, band_end - 1)])
     return sorted(set(picked))
 
@@ -137,6 +143,7 @@ def sample_judge_evidence(
     novel_id: str,
     windows: int = DEFAULT_WINDOWS,
     window_chars: int = DEFAULT_WINDOW_CHARS,
+    seed_salt: str = "",
 ) -> str:
     """Build judge-facing evidence: the synopsis plus unused chapters."""
 
@@ -152,7 +159,7 @@ def sample_judge_evidence(
         sections.append(f"【作品简介】\n{blurb}")
 
     chapters = split_chapters(text)
-    indices = judge_chapter_indices(novel_id, chapters, windows=windows)
+    indices = judge_chapter_indices(novel_id, chapters, windows=windows, seed_salt=seed_salt)
     if indices:
         for index in indices:
             chapter = chapters[index]

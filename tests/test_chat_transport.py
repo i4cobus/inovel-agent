@@ -45,3 +45,38 @@ def test_local_urls_bypass_the_proxy_but_gateways_do_not() -> None:
 def test_proxy_bypass_can_be_forced() -> None:
     transport = HTTPChatTransport(model="m", base_url="https://gateway.example.com/v1", bypass_proxy=True)
     assert transport.bypass_proxy is True
+
+
+def test_chat_payload_carries_tools_and_parses_tool_calls() -> None:
+    from src.chat_transport import parse_chat_response
+
+    transport = HTTPChatTransport(model="qwen", base_url="http://127.0.0.1:11434/v1")
+    tools = [{"type": "function", "function": {"name": "f", "parameters": {"type": "object", "properties": {}}}}]
+    payload = transport.build_chat_payload([{"role": "user", "content": "hi"}], tools, max_tokens=8)
+    assert payload["tools"] == tools and payload["tool_choice"] == "auto"
+    assert "tools" not in transport.build_chat_payload([], None, 8)
+
+    data = {
+        "choices": [
+            {
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {"id": "a", "type": "function", "function": {"name": "f", "arguments": '{"x": 1}'}},
+                        {"id": "b", "type": "function", "function": {"name": "g", "arguments": "{broken"}},
+                        {"type": "function", "function": {"name": "h", "arguments": {"y": 2}}},
+                    ],
+                },
+            }
+        ],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 4},
+    }
+    response = parse_chat_response(data)
+    assert response.content == "" and response.finish_reason == "tool_calls"
+    assert [c.name for c in response.tool_calls] == ["f", "g", "h"]
+    assert response.tool_calls[0].arguments == {"x": 1}
+    assert response.tool_calls[1].arguments is None and response.tool_calls[1].raw_arguments == "{broken"
+    assert response.tool_calls[2].arguments == {"y": 2} and response.tool_calls[2].id == "call_2"
+    assert response.usage.prompt_tokens == 3

@@ -52,6 +52,33 @@ class ChatTransport(Protocol):
         """Return the assistant message text for a single-turn prompt."""
 
 
+@dataclass(frozen=True)
+class ToolCall:
+    """One function call the model asked for. ``arguments`` is None when its JSON was invalid."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any] | None
+    raw_arguments: str = ""
+
+
+@dataclass(frozen=True)
+class ChatResponse:
+    """An assistant turn: text, the tool calls it requested, and endpoint-reported usage."""
+
+    content: str
+    tool_calls: tuple[ToolCall, ...]
+    usage: TokenUsage
+    finish_reason: str = ""
+
+
+class ChatModel(Protocol):
+    """Multi-turn chat with tool calling, so the agent loop can run on a stub."""
+
+    def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None, max_tokens: int) -> ChatResponse:
+        """Return the assistant turn for a message list, with optional tool definitions."""
+
+
 @dataclass
 class HTTPChatTransport:
     """POSTs to an OpenAI-compatible ``/chat/completions`` endpoint."""
@@ -141,10 +168,38 @@ class HTTPChatTransport:
     def complete_with_usage(self, prompt: str, max_tokens: int) -> tuple[str, TokenUsage]:
         """Like ``complete``, but also returns the endpoint-reported token usage."""
 
+        data = self.post_chat(self.build_payload(prompt, max_tokens))
+        return extract_message_content(data), extract_usage(data)
+
+    def build_chat_payload(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None, max_tokens: int
+    ) -> dict[str, Any]:
+        """Request body for a multi-turn call with OpenAI-style function tools."""
+
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": self.temperature,
+            **self.extra_body,
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        return payload
+
+    def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None, max_tokens: int) -> ChatResponse:
+        """One assistant turn over a message list; tool calls come back parsed."""
+
+        data = self.post_chat(self.build_chat_payload(messages, tools, max_tokens))
+        return parse_chat_response(data)
+
+    def post_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """POST one chat-completions payload, retrying transient failures with linear backoff."""
+
         import httpx
 
         url = f"{self.base_url}/chat/completions"
-        payload = self.build_payload(prompt, max_tokens)
         last_error: Exception | None = None
 
         for attempt in range(self.max_retries):
@@ -154,8 +209,7 @@ class HTTPChatTransport:
                     last_error = RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
                 else:
                     response.raise_for_status()
-                    data = response.json()
-                    return extract_message_content(data), extract_usage(data)
+                    return response.json()
             except httpx.HTTPError as exc:
                 last_error = exc
             if attempt < self.max_retries - 1 and self.backoff_seconds:
@@ -190,3 +244,47 @@ def extract_message_content(data: dict[str, Any]) -> str:
     if content is None:
         raise ValueError("Chat completion response is missing message content")
     return str(content)
+
+
+def parse_chat_response(data: dict[str, Any]) -> ChatResponse:
+    """Parse an assistant turn, keeping an unparseable tool argument string as evidence.
+
+    A model that emits broken JSON for a tool call has made a distinct, scorable
+    mistake (参数错误). Raising here would turn it into a transport failure.
+    """
+
+    import json
+
+    choices = data.get("choices") or []
+    if not choices:
+        raise ValueError(f"No choices in chat completion response: {str(data)[:200]}")
+    choice = choices[0]
+    message = choice.get("message") or {}
+    calls: list[ToolCall] = []
+    for index, call in enumerate(message.get("tool_calls") or []):
+        function = call.get("function") or {}
+        raw = function.get("arguments")
+        if isinstance(raw, dict):
+            arguments: dict[str, Any] | None = raw
+            raw_text = json.dumps(raw, ensure_ascii=False)
+        else:
+            raw_text = str(raw or "")
+            try:
+                parsed = json.loads(raw_text) if raw_text.strip() else {}
+                arguments = parsed if isinstance(parsed, dict) else None
+            except json.JSONDecodeError:
+                arguments = None
+        calls.append(
+            ToolCall(
+                id=str(call.get("id") or f"call_{index}"),
+                name=str(function.get("name") or ""),
+                arguments=arguments,
+                raw_arguments=raw_text,
+            )
+        )
+    return ChatResponse(
+        content=str(message.get("content") or ""),
+        tool_calls=tuple(calls),
+        usage=extract_usage(data),
+        finish_reason=str(choice.get("finish_reason") or ""),
+    )
