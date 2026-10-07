@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from src.config import DATA_DIR
-from src.http_matcher import TokenUsage
+from src.chat_transport import TokenUsage
 
 JUDGE_PROMPT_VERSION = "judge_v2"
 JUDGE_CACHE_PATH = DATA_DIR / "cache" / "judge_cache.jsonl"
@@ -179,7 +179,7 @@ def parse_judge_verdict(text: str) -> JudgeVerdict | None:
     false`` — inverted on both fields — and cached it.
     """
 
-    from src.llm_matcher import extract_json_object
+    from src.llm_json import extract_json_object
 
     try:
         return JudgeVerdict.from_dict(extract_json_object(text))

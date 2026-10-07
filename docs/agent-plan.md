@@ -19,7 +19,7 @@ agent 评测体系」，用于 2026 年秋招 agent 算法岗。对照目标岗�
 | Trajectory Analysis | 结构化轨迹日志 + 固定失败标签集 | 新做 |
 | LLM-as-Judge | 四个软指标，沿用人工标注校准流程 | 沿用方法 |
 | Synthetic Data | 任务合成（模板 + 本地模型 + 可验证过滤） | 沿用方法 |
-| SFT / RL | 已完成的 SFT + 四轮 GRPO（见 `docs/post-training.md`） | 已有，不新跑 |
+| SFT / RL | 已完成的 SFT + 四轮 GRPO（见 `docs/v1-reranker/README.md`） | 已有，不新跑 |
 | Trajectory Learning | **不做** | 砍 |
 | 论文复现 | **不做** | 砍 |
 
@@ -247,6 +247,10 @@ agent 的每个数字旁边都放这一列。这是本项目对「做成 agent �
 软指标的子集，**跑前报模型、调用量、预估 token、prompt**。沿用 `src/judge.py` 的
 `BudgetGuard` 和缓存。
 
+两条从旧 judge 脚本（已删的 `09_judge_eval.py`）继承的纪律，新脚本 35 要重新实现并带测试：
+一个 (任务, 书) 对如果在人工标注表里有证据摘录，judge 必须复用**同一份**摘录，而不是重新
+采样，否则 profile 一变 judge 和人工看的就不是同一段文字；不在表里的对才新采样。
+
 ### 4.5 统计与算力
 
 - 主比较：模型配置之间逐任务配对（8B、14B、30B-A3B，thinking 开/关），报 bootstrap
@@ -264,20 +268,27 @@ agent 的每个数字旁边都放这一列。这是本项目对「做成 agent �
 5. `check_trope` 校验表（对旧评测元标签标签的精确率 / 召回率，按标签分）
 6. 工具调用效率表（步数、冗余率、token）
 
-## 5. 代码迁移
+## 5. 代码迁移（2026-10-07 已执行）
 
-先打 tag `v1-reranker`，再动代码。
+tag `v1-reranker` 指向删除前的最后一个提交。实际处置和计划的出入在表后注明。
 
 | 模块 | 处置 |
 |---|---|
-| `ingest clean profile embed vector_index search split_chapters evidence preferences backends http_matcher judge evaluation annotate_app config schema text_utils splits` | 保留 |
-| `rank llm_matcher explain llm_explain report app_pipeline query_expansion` | 删，运行时不再需要 |
-| `grpo_reward verl_reward sft_data query_synthesis` | 删出运行时；方法与结果写入 `docs/post-training.md` |
-| 脚本 04–09、13–23 | 删；01、02、03、10、11、12 保留（03 改参数重建） |
-| 对应测试 | 随模块删 |
-| `streamlit_app` | 重写 |
+| `ingest clean profile embed vector_index search split_chapters evidence preferences judge evaluation annotate_app config schema text_utils splits` | 保留 |
+| `http_matcher` | 改名 `chat_transport`，只留 `HTTPChatTransport` 等传输层；重排用的 `OpenAICompatibleMatcher` 删除 |
+| `llm_matcher` 中的 `extract_json_object` / `split_first_json_object` | 迁到新模块 `llm_json`，judge 和将来的 agent loop 共用 |
+| `search` | 只留 `semantic_search`；多查询合并是 agent 的事 |
+| `rank llm_matcher explain llm_explain report app_pipeline query_expansion backends streamlit_app` | 删 |
+| `grpo_reward verl_reward sft_data query_synthesis` | 删出运行时；方法与结果在 `docs/v1-reranker/` |
+| 脚本 04–09、13、14、17–23、`serve_teacher.sh` | 删 |
+| 脚本 01、02、03、10、11、12、15、16 | 保留。15 产出规则盲区表，16 产出 `check_term` 运行时要读的词频表，两者原计划删，实际需要 |
+| 对应测试 | 随模块删；transport 测试改名 `test_chat_transport`，JSON 提取测试独立为 `test_llm_json` |
+| 旧 README、`architecture.md`、`evaluation.md` | 移到 `docs/v1-reranker/`，原计划的 `docs/post-training.md` 不单独建 |
 
-新增：
+与计划的出入：`backends` 原计划保留，实际是重排器的工厂，随之删除；`streamlit_app`
+原计划重写，实际先删，agent 版另写。
+
+新增（待写）：
 
 ```text
 src/agent/     loop.py  tools.py  memory.py  context.py  trajectory.py
@@ -285,13 +296,9 @@ src/rag/       chunk.py  index.py  retrieve.py
 eval/agent/    tasks/（合成任务 JSONL）  metrics.py  failure_labels.py
 scripts/       30_rebuild_book_index.py  31_build_chunk_index.py  32_synthesize_tasks.py
                33_run_agent_eval.py  34_agent_metrics.py  35_judge_agent.py
-docs/          post-training.md（旧 README 的主体）  agent-plan.md（本文）
 ```
 
 脚本编号从 30 起，延续「按执行顺序编号」的约定，和删掉的号段不混。
-
-README 重写为 agent 项目；后训练作为一章链接到 `docs/post-training.md`，结果表和
-`eval/results/` 原样保留。
 
 ## 6. 模型与算力
 

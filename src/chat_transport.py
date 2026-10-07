@@ -1,30 +1,15 @@
-"""OpenAI-compatible HTTP backend for candidate scoring, expansion, and explanation.
+"""OpenAI-compatible ``/chat/completions`` transport.
 
-Speaks the ``/chat/completions`` protocol, so the same client drives a locally
-served vLLM instance and a hosted gateway. Keeping the model behind HTTP means
-this project never has to depend on ``vllm`` directly, which would drag in its own
-torch pin and fight the cu128 / torch 2.11 constraint this host needs.
-
-Unlike ``TransformersMatcher``, which generates one candidate at a time, this
-backend exposes ``score_many`` for concurrent scoring — the point of moving off
-in-process generation in the first place.
+One client drives a locally served model (Ollama, vLLM) and a hosted gateway, so
+the judge and the agent loop never import an inference engine directly.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
-
-from src.llm_matcher import (
-    LLMMatchResult,
-    build_match_prompt,
-    build_query_expansion_prompt,
-    parse_llm_match_result,
-)
+from typing import Any, Protocol
 
 DEFAULT_BASE_URL = os.environ.get("INOVELREC_LLM_BASE_URL", "http://127.0.0.1:8000/v1")
 DEFAULT_API_KEY_ENV = "INOVELREC_LLM_API_KEY"
@@ -32,7 +17,6 @@ DEFAULT_TIMEOUT = 120.0
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_BACKOFF_SECONDS = 1.0
 DEFAULT_MAX_WORKERS = 16
-DEFAULT_MAX_NEW_TOKENS = 256
 RETRY_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1", "0.0.0.0")
 
@@ -206,135 +190,3 @@ def extract_message_content(data: dict[str, Any]) -> str:
     if content is None:
         raise ValueError("Chat completion response is missing message content")
     return str(content)
-
-
-class OpenAICompatibleMatcher:
-    """Drop-in replacement for ``TransformersMatcher`` backed by an HTTP endpoint.
-
-    Satisfies the ``CandidateMatcher`` (``score``), ``LLMExpansionProvider``
-    (``expand_queries``), and ``ExplanationGenerator`` (``generate``) protocols.
-    """
-
-    provider = "openai_compatible"
-
-    def __init__(
-        self,
-        transport: ChatTransport,
-        max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-    ) -> None:
-        if max_workers < 1:
-            raise ValueError("max_workers must be positive")
-        self.transport = transport
-        self.max_new_tokens = max_new_tokens
-        self.max_workers = max_workers
-
-    def generate_response(self, prompt: str, max_new_tokens: int | None = None) -> str:
-        """Generate a single response, mirroring ``TransformersMatcher``."""
-
-        return self.transport.complete(prompt, max_tokens=max_new_tokens or self.max_new_tokens)
-
-    def generate(self, prompt: str, max_new_tokens: int = 512) -> str:
-        """Satisfy the Stage 5 ``ExplanationGenerator`` protocol."""
-
-        return self.generate_response(prompt, max_new_tokens=max_new_tokens)
-
-    def score(
-        self,
-        query: str,
-        candidate: dict[str, Any],
-        profile_text: str,
-        max_profile_chars: int = 1200,
-    ) -> LLMMatchResult:
-        """Score one candidate, degrading to a parse-failure result like the local matcher."""
-
-        prompt = build_match_prompt(
-            query=query,
-            candidate=candidate,
-            profile_text=profile_text,
-            max_profile_chars=max_profile_chars,
-        )
-        response = self.generate_response(prompt)
-        return parse_match_response(response)
-
-    def score_many(
-        self,
-        query: str,
-        items: list[tuple[dict[str, Any], str]],
-        max_profile_chars: int = 1200,
-        on_result: Callable[[int, LLMMatchResult | None], None] | None = None,
-    ) -> list[LLMMatchResult | None]:
-        """Score candidates concurrently, preserving input order.
-
-        Returns ``None`` in a slot whose request failed outright, so the caller can
-        distinguish "the model said this is a bad match" from "we never got an
-        answer" and avoid caching the latter.
-        """
-
-        if not items:
-            return []
-
-        results: list[LLMMatchResult | None] = [None] * len(items)
-
-        def run(index: int) -> None:
-            candidate, profile_text = items[index]
-            try:
-                results[index] = self.score(query, candidate, profile_text, max_profile_chars)
-            except Exception:  # noqa: BLE001 - a dead request must not kill the batch
-                results[index] = None
-            if on_result is not None:
-                on_result(index, results[index])
-
-        workers = min(self.max_workers, len(items))
-        if workers == 1:
-            for index in range(len(items)):
-                run(index)
-            return results
-
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            list(executor.map(run, range(len(items))))
-        return results
-
-    def expand_queries(self, raw_query: str, max_queries: int) -> str:
-        """Generate retrieval-friendly expanded queries as raw JSON text."""
-
-        prompt = build_query_expansion_prompt(raw_query=raw_query, max_queries=max_queries)
-        return self.generate_response(prompt, max_new_tokens=min(self.max_new_tokens, 256))
-
-
-def parse_match_response(response: str) -> LLMMatchResult:
-    """Parse a scoring response, falling back exactly like ``TransformersMatcher``."""
-
-    try:
-        return parse_llm_match_result(response)
-    except (ValueError, json.JSONDecodeError, TypeError):
-        return LLMMatchResult(
-            llm_match_score=0.0,
-            confidence="low",
-            risk_flags=["llm_parse_failed"],
-            reason=response[:180],
-        )
-
-
-def create_openai_compatible_matcher(
-    model: str,
-    base_url: str = DEFAULT_BASE_URL,
-    api_key: str | None = None,
-    max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS,
-    max_workers: int = DEFAULT_MAX_WORKERS,
-    timeout: float = DEFAULT_TIMEOUT,
-    extra_body: dict[str, Any] | None = None,
-) -> OpenAICompatibleMatcher:
-    """Create a matcher backed by an OpenAI-compatible endpoint."""
-
-    transport = HTTPChatTransport(
-        model=model,
-        base_url=base_url,
-        api_key=api_key,
-        timeout=timeout,
-        extra_body=extra_body or {},
-        # Headroom over max_workers: callers that score several queries at once drive
-        # more concurrent requests than any single score_many opens.
-        max_connections=max(max_workers * 2, DEFAULT_MAX_WORKERS * 2),
-    )
-    return OpenAICompatibleMatcher(transport, max_new_tokens=max_new_tokens, max_workers=max_workers)
