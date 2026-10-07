@@ -361,7 +361,7 @@ scripts/       30_build_book_indexes.py  31_retrieval_bench.py  32_build_book_ca
 - 公开 demo 只放打码截图；轨迹脱敏后才进 git（3.6、4.3）。
 
 - agent 写记忆不需要用户确认，但回答里显式说明「已记住……」（3.4）。
-- 文档和 README 统一用中文；现有英文文档在重写时转中文。
+- 文档和 README 统一用中文，另补一份英文 `README.en.md` 作摘要；现有英文文档在重写时转中文。
 - `.gitignore` 不再整体忽略 `docs/`，只忽略含语料的 `docs/prompt*.md`、`docs/pre_interview.md`。
 - `ask_book` 不做 `chapter_range`，防剧透和范围摘要都不做（3.3）。
 
