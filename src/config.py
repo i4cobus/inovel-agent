@@ -10,7 +10,7 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed"
 INDEX_DIR = DATA_DIR / "index"
 # One book-index configuration per directory under INDEX_DIR (built by scripts/30).
 # This is the one the agent and the apps load; the retrieval benchmark picks it.
-DEFAULT_INDEX_DIR = INDEX_DIR / "multi_0p6b"
+DEFAULT_INDEX_DIR = INDEX_DIR / "single_0p6b"
 DEFAULT_OUTPUT_PATH = PROCESSED_DATA_DIR / "novels.parquet"
 
 # Stage 1/2 walk a ~36 GB corpus doing encoding detection and regex chapter splitting.
