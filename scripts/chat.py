@@ -31,11 +31,12 @@ def main(
     index_dir: Path = typer.Option(DEFAULT_INDEX_DIR),
     device: str | None = typer.Option(None, help="Device for the query embedder; cpu is fine."),
     max_steps: int = typer.Option(10),
+    reasoning_effort: str | None = typer.Option(None, help="Ollama thinking control, e.g. none / low / high; None leaves the model default."),
     show_steps: bool = typer.Option(True, "--show-steps/--quiet"),
     trajectories: Path = typer.Option(DATA_DIR / "trajectories" / "chat.jsonl"),
     once: str | None = typer.Option(None, help="Ask one question and exit (for smoke tests)."),
 ) -> None:
-    agent = build_agent(model=model, base_url=base_url, index_dir=index_dir, device=device, config=AgentConfig(max_steps=max_steps))
+    agent = build_agent(model=model, base_url=base_url, index_dir=index_dir, device=device, reasoning_effort=reasoning_effort, config=AgentConfig(max_steps=max_steps))
     console.print(f"[bold]ready[/bold] {agent.info}")
     history: list[dict] = []
 

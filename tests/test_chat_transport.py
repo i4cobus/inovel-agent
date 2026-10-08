@@ -53,8 +53,11 @@ def test_chat_payload_carries_tools_and_parses_tool_calls() -> None:
     transport = HTTPChatTransport(model="qwen", base_url="http://127.0.0.1:11434/v1")
     tools = [{"type": "function", "function": {"name": "f", "parameters": {"type": "object", "properties": {}}}}]
     payload = transport.build_chat_payload([{"role": "user", "content": "hi"}], tools, max_tokens=8)
-    assert payload["tools"] == tools and payload["tool_choice"] == "auto"
+    assert payload["tools"] == tools and "tool_choice" not in payload and "reasoning_effort" not in payload
     assert "tools" not in transport.build_chat_payload([], None, 8)
+    quiet = HTTPChatTransport(model="qwen", base_url="http://127.0.0.1:11434/v1", reasoning_effort="none")
+    assert quiet.build_chat_payload([], None, 8)["reasoning_effort"] == "none"
+    assert quiet.build_payload("p", 8)["reasoning_effort"] == "none"
 
     data = {
         "choices": [

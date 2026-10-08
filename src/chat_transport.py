@@ -94,6 +94,9 @@ class HTTPChatTransport:
     # through an outbound proxy, but a hosted gateway usually has to be.
     bypass_proxy: bool | None = None
     extra_body: dict[str, Any] = field(default_factory=dict)
+    # Ollama's /v1 endpoint controls thinking through reasoning_effort ("none" disables it on
+    # models that allow it; values are per model, see /api/show). None sends nothing.
+    reasoning_effort: str | None = None
     # Sized to the caller's concurrency, not to a module constant. The pool used to
     # be a fixed 32 connections however many workers the caller asked for, so a run
     # driving 80 threads still got 32 in flight and the rest queued: SFT assembly
@@ -152,13 +155,16 @@ class HTTPChatTransport:
         before any JSON appeared, so every verdict parsed as a failure.
         """
 
-        return {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
             "temperature": self.temperature,
             **self.extra_body,
         }
+        if self.reasoning_effort is not None:
+            payload["reasoning_effort"] = self.reasoning_effort
+        return payload
 
     def complete(self, prompt: str, max_tokens: int) -> str:
         """Send one prompt, retrying transient failures with linear backoff."""
@@ -183,9 +189,11 @@ class HTTPChatTransport:
             "temperature": self.temperature,
             **self.extra_body,
         }
+        if self.reasoning_effort is not None:
+            payload["reasoning_effort"] = self.reasoning_effort
         if tools:
+            # No tool_choice: "auto" is the default everywhere and Ollama rejects the field.
             payload["tools"] = tools
-            payload["tool_choice"] = "auto"
         return payload
 
     def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None, max_tokens: int) -> ChatResponse:

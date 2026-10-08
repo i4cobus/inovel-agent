@@ -136,6 +136,7 @@ def build_agent(
     device: str | None = None,
     embedding_dtype: str | None = None,
     trope_model: str | None = None,
+    reasoning_effort: str | None = None,
     config: AgentConfig = AgentConfig(),
     budget: ContextBudget = ContextBudget(),
     embedder_factory: Callable[..., Any] | None = None,
@@ -153,8 +154,8 @@ def build_agent(
     profiles = ParquetProfiles.load(profiles_path)
     densities = load_density_table(density_path)
     memory = UserMemory.load(memory_path)
-    transport = HTTPChatTransport(model=model, base_url=base_url)
-    trope_transport = HTTPChatTransport(model=trope_model or model, base_url=base_url)
+    transport = HTTPChatTransport(model=model, base_url=base_url, reasoning_effort=reasoning_effort)
+    trope_transport = HTTPChatTransport(model=trope_model or model, base_url=base_url, reasoning_effort=reasoning_effort)
     judge = CachedTropeJudge(trope_transport, LazyRawText(inventory_path), model_name=trope_model or model)
 
     bundle = AgentBundle(loop=None, tools=ToolRegistry(), memory=memory, memory_path=memory_path)  # type: ignore[arg-type]
@@ -168,6 +169,7 @@ def build_agent(
     bundle.info = {
         "model": model,
         "base_url": base_url,
+        "reasoning_effort": reasoning_effort,
         "index_dir": index_dir.as_posix(),
         "searcher": searcher.name,
         "profiles": len(profiles),
