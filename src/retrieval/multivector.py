@@ -68,6 +68,25 @@ def build_section_table(profiles: pd.DataFrame) -> tuple[list[str], list[Section
     return texts, records
 
 
+def section_stats(records: list[SectionRecord]) -> dict[str, float]:
+    """How many sections each book got. A multi-vector build over profiles that
+    split into one section each is a single-vector build in disguise, which is
+    what happened on 2026-10-08 against a profile table written by an older
+    ``make_profile_text`` with different markers."""
+
+    counts: dict[str, int] = {}
+    for record in records:
+        counts[record.novel_id] = counts.get(record.novel_id, 0) + 1
+    if not counts:
+        return {"books": 0, "sections": 0, "mean_per_book": 0.0, "share_single": 0.0}
+    return {
+        "books": len(counts),
+        "sections": len(records),
+        "mean_per_book": round(len(records) / len(counts), 2),
+        "share_single": round(sum(1 for c in counts.values() if c == 1) / len(counts), 4),
+    }
+
+
 def make_book_meta(profiles: pd.DataFrame, preview_chars: int = 300) -> dict[str, dict[str, str]]:
     return {
         str(row.novel_id): {"title_guess": str(row.title_guess or ""), "profile_text_preview": str(row.profile_text)[:preview_chars]}

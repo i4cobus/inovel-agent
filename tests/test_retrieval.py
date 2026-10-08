@@ -10,7 +10,7 @@ from src.profile import make_profile_text
 from src.retrieval.bench import BenchQuery, anchor_rank, evaluate, format_table, load_benchmark
 from src.retrieval.bm25 import BM25Index, tokenize
 from src.retrieval.hybrid import BM25Searcher, HybridSearcher, MultiVectorSearcher, reciprocal_rank_fusion
-from src.retrieval.multivector import MultiVectorIndex, build_section_table, make_book_meta, split_profile_sections
+from src.retrieval.multivector import MultiVectorIndex, build_section_table, make_book_meta, section_stats, split_profile_sections
 
 
 class CharHashModel:
@@ -178,3 +178,15 @@ def test_evaluate_reads_anchor_ranks_and_recall_from_one_ranking() -> None:
     table = format_table([result])
     assert table.startswith("| config | anchors |") and "| fixed |" in table
     assert anchor_rank([], "x") is None
+
+
+def test_section_stats_flag_a_single_section_table() -> None:
+    _, records = build_section_table(frame())
+    stats = section_stats(records)
+    assert stats == {"books": 3, "sections": 7, "mean_per_book": 2.33, "share_single": round(1 / 3, 4)}
+
+    old_format = pd.DataFrame([{"novel_id": "x", "title_guess": "t", "profile_text": "标题：t\n\n开篇样本：\n正文" }])
+    _, records = build_section_table(old_format)
+    assert section_stats(records)["share_single"] == 1.0
+    assert section_stats([]) == {"books": 0, "sections": 0, "mean_per_book": 0.0, "share_single": 0.0}
+

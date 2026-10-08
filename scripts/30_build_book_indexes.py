@@ -18,7 +18,7 @@ from rich.console import Console
 from src.config import INDEX_DIR
 from src.embed import DEFAULT_BATCH_SIZE, DEFAULT_EMBEDDING_MODEL, encode_documents_with_backoff, load_embedding_model
 from src.retrieval.bm25 import BM25Index
-from src.retrieval.multivector import MultiVectorIndex, build_section_table, make_book_meta
+from src.retrieval.multivector import MultiVectorIndex, build_section_table, make_book_meta, section_stats
 from src.vector_index import (
     DEFAULT_PROFILES_PATH,
     build_faiss_index,
@@ -78,6 +78,14 @@ def main(
             vectors = int(embeddings.shape[0])
         else:
             texts, records = build_section_table(frame)
+            stats = section_stats(records)
+            summary["sections"] = stats
+            console.print(f"Sections: {stats}")
+            if stats["share_single"] > 0.5:
+                raise typer.BadParameter(
+                    f"{stats['share_single']:.0%} of profiles split into a single section: this profile table was not "
+                    "written by the current make_profile_text (no 节选N： markers). Rebuild profiles with 02 first."
+                )
             embeddings, used_batch = encode_documents_with_backoff(embedder, texts, batch_size=batch_size)
             MultiVectorIndex.build(embeddings, records, make_book_meta(frame)).save(out_dir)
             vectors = len(records)
