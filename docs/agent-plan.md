@@ -332,16 +332,22 @@ scripts/       30_build_book_indexes.py  31_retrieval_bench.py  32_build_book_ca
 
 ## 6. 模型与算力
 
-| 候选 | 放哪 | 显存 / 内存（估算） | 把握 |
-|---|---|---|---|
-| Qwen3-8B 4-bit | 4080 | 约 6 GB + 0.6B 嵌入 1 GB 多 | 装得下 |
-| Qwen3-14B 4-bit | 4080 | 权重约 9 GB + 16k 上下文 KV 约 2 到 3 GB + 嵌入 | **不确定**，要实测 |
-| Qwen3-30B-A3B 4-bit | Mac | 权重约 17 GB，激活 3B 速度快 | **不确定** 24 GB 够不够留上下文 |
+2026-10-08 调研后更新（之前写的 qwen3:8b / 14B / 30B-A3B 作废）。Qwen3.5 系列 2026 年 2–3 月
+发布，Apache 2.0，256K 上下文，默认开 thinking、可按请求关闭，工具调用官方支持。
 
-- 同尺寸优先 2507 更新版（Instruct 版改善了工具调用）。开工时查最新版本。
-- 服务方式：Windows 侧 Ollama 的 OpenAI 兼容端点（vLLM 不可用）。要确认 Ollama 对
-  Qwen3 的 tool calling 和 thinking 开关支持。Mac 侧 Ollama 或 MLX。
-- 8B 是固定 baseline；14B 和 30B-A3B 在同一任务集上实测后选主模型。
+| 候选 | 4-bit 体积 | 放哪 | 依据 | 角色 |
+|---|---|---|---|---|
+| Qwen3.5-9B | 6.6–7.6 GB（Ollama `qwen3.5:9b`） | 4080，余量大 | BFCL-V4 66.1，TAU2 79.1，官方称同级最强工具调用 | PC 主力 baseline |
+| Qwen3.5-4B | 3.3–4 GB | 4080 | 同系列 | 弱模型对照臂 |
+| Qwen3.6-35B-A3B | 约 20 GB | 只能 Mac，24 GB 很紧 | 中文社区评价工具调用最稳 | Mac 候选，装不装得下要实测 |
+| Qwen3.8-27B | 18 GB（Ollama） | 只能 Mac | 2026-08 发布，长程 agent 任务最强 | Mac 上的强模型臂 |
+
+不选的：Gemma 4（中文弱于 Qwen）、gpt-oss-20b（纯文本、英文为主、12.8 GB 显存太紧）、
+GLM-4.7-Flash 与 Muse Glimmer 30B（4080 放不下）。
+
+- 服务方式：PC 上 Ollama 0.40.1（2026-10-08 经用户同意安装），OpenAI 兼容端点
+  `http://127.0.0.1:11434/v1`。Mac 侧 Ollama 或 MLX。
+- 9B 是固定 baseline；Mac 上的两个候选在同一任务集上实测后决定主模型。
 
 ## 7. 分期
 
@@ -374,7 +380,7 @@ scripts/       30_build_book_indexes.py  31_retrieval_bench.py  32_build_book_ca
 
 1. ~~3.7 的检索基准~~ 已做，0.6B 单/多向量 × BM25，见 `docs/retrieval-bench.md`。4B 和池化变体列入待办，不阻塞 agent。
 2. 选定嵌入模型在 4080 上的吞吐；重建书籍级索引和 200 本段落级索引的实际耗时。
-3. 三个候选 agent 模型的显存占用和每步延迟。
+3. Qwen3.5-9B 在 4080 上的每步延迟；Qwen3.6-35B-A3B / Qwen3.8-27B 在 Mac 上能否装下。
 4. Ollama 的 tool calling 与 Qwen3 配合是否稳定。
 5. `check_trope` 对旧评测元标签标签的精确率 / 召回率；采样 5,000 字够不够。
 

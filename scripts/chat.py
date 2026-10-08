@@ -1,6 +1,6 @@
 """Talk to the agent from a terminal, against the real index and a local model server.
 
-    uv run python scripts/chat.py --model qwen3:8b --base-url http://127.0.0.1:11434/v1
+    uv run python scripts/chat.py --model qwen3.5:9b --base-url http://127.0.0.1:11434/v1
 
 Every turn's trajectory is appended, unredacted, to data/trajectories/chat.jsonl
 (local only); memory is saved after each turn.

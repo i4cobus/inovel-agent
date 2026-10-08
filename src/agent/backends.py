@@ -31,7 +31,7 @@ from src.vector_index import DEFAULT_PROFILES_PATH
 
 DEFAULT_DENSITY_PATH = PROCESSED_DATA_DIR / "term_density.parquet"
 DEFAULT_CHAT_BASE_URL = "http://127.0.0.1:11434/v1"  # Ollama's OpenAI-compatible endpoint
-DEFAULT_AGENT_MODEL = "qwen3:8b"
+DEFAULT_AGENT_MODEL = "qwen3.5:9b"
 
 
 class ParquetProfiles:
