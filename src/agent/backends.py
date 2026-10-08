@@ -118,6 +118,18 @@ class AgentBundle:
     turn: int = 0
     info: dict[str, Any] = field(default_factory=dict)
 
+    def reset_memory(self, memory_path: Path) -> None:
+        """Point the agent at a fresh memory file (one per evaluation task) without reloading anything else."""
+
+        from src.agent.tools import build_memory_tools
+
+        self.memory = UserMemory.load(memory_path)
+        self.memory_path = memory_path
+        self.turn = 0
+        for spec in build_memory_tools(self.memory, turn_counter=lambda: self.turn):
+            self.tools.specs[spec.name] = spec
+        self.loop.memory = self.memory
+
     def chat(self, user_message: str, history: list[dict[str, Any]] | None = None, task_id: str = "") -> Any:
         self.turn += 1
         run = self.loop.run(user_message, history=history, task_id=task_id)
