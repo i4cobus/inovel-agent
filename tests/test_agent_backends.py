@@ -71,11 +71,14 @@ def test_build_agent_assembles_tools_from_artifacts(tmp_path: Path, monkeypatch:
     assert bundle.tools.call("check_term", {"novel_id": "a", "terms": ["系统"]})["violates"] is False
 
     # One scripted turn through the real loop: the memory tool writes and the file is saved after the turn.
+    from src.chat_transport import ToolCall
+
     def fake_chat(messages: list[dict], tools: list[dict] | None, max_tokens: int) -> ChatResponse:
-        return ChatResponse(content="好的", tool_calls=(), usage=TokenUsage())
+        assert tools and tools[-1]["function"]["name"] == "finish"
+        return ChatResponse(content="", tool_calls=(ToolCall("f", "finish", {"answer": "好的"}, "{}"),), usage=TokenUsage())
 
     monkeypatch.setattr(bundle.loop.model, "chat", fake_chat)
     bundle.memory.write("negative", "系统", True)
     run = bundle.chat("随便聊聊")
-    assert run.final_answer == "好的" and bundle.turn == 1
+    assert run.final_answer == "好的" and run.trajectory.termination == "finish" and bundle.turn == 1
     assert (tmp_path / "memory" / "user.json").exists()
