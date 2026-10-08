@@ -20,6 +20,10 @@ from src.config import INDEX_DIR
 
 app = typer.Typer(add_completion=False)
 
+# single_0p6b encodes the whole digest in one pass. Digests average 8.7k tokens (max 12k), and on
+# 2026-10-08 batch 8 in bf16 filled the 4080 and spilled into system memory: 250 s per batch,
+# 67 hours projected, stopped at 2%. The single-vector index is now derived from the multi-vector
+# one on the Mac (scripts/33_pool_single_from_multi.py); keep --only multi_0p6b on the PC.
 SWEEPS: dict[str, list[dict[str, object]]] = {
     "0p6b": [
         {"name": "single_0p6b", "model": "Qwen/Qwen3-Embedding-0.6B", "dense": "single", "dtype": "bf16", "batch_size": 16},
@@ -45,10 +49,14 @@ def main(
     device: str = typer.Option("cuda:0"),
     limit: int | None = typer.Option(None, help="Smoke run: first N profiles only."),
     depth: int = typer.Option(1000),
+    only: str | None = typer.Option(None, help="Run just the configuration with this name, e.g. multi_0p6b."),
 ) -> None:
     if sweep not in SWEEPS:
         raise typer.BadParameter(f"sweep must be one of {sorted(SWEEPS)}")
-    for config in SWEEPS[sweep]:
+    configs = [c for c in SWEEPS[sweep] if only is None or c["name"] == only]
+    if not configs:
+        raise typer.BadParameter(f"--only {only!r} matches nothing in sweep {sweep!r}: {[c['name'] for c in SWEEPS[sweep]]}")
+    for config in configs:
         out_dir = INDEX_DIR / str(config["name"]) if limit is None else INDEX_DIR / f"{config['name']}_smoke{limit}"
         if (out_dir / "build_summary.json").exists():
             print(f"[sweep] {out_dir} already built, skipping build", flush=True)
