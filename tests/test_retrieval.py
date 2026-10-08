@@ -1,4 +1,5 @@
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -190,3 +191,33 @@ def test_section_stats_flag_a_single_section_table() -> None:
     assert section_stats(records)["share_single"] == 1.0
     assert section_stats([]) == {"books": 0, "sections": 0, "mean_per_book": 0.0, "share_single": 0.0}
 
+
+
+def test_load_searchers_autodetects_what_a_directory_holds(tmp_path: Path) -> None:
+    from src.retrieval.hybrid import load_searchers
+    from src.vector_index import make_id_map, save_faiss_index, save_id_map, build_faiss_index
+
+    model = CharHashModel()
+    df = frame()
+    meta = make_book_meta(df)
+
+    multi_dir = tmp_path / "multi"
+    texts, records = build_section_table(df)
+    MultiVectorIndex.build(model.encode(texts), records, meta).save(multi_dir, metadata={"model_name": "fake"})
+    BM25Index.build(df["profile_text"].tolist(), df["novel_id"].tolist()).save(multi_dir / "bm25.json")
+    (multi_dir / "book_meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    names = [s.name for s in load_searchers(multi_dir, model)]
+    assert names == ["multi/dense_multi", "multi/bm25", "multi/hybrid_rrf"]
+
+    single_dir = tmp_path / "single"
+    single_dir.mkdir()
+    save_faiss_index(build_faiss_index(model.encode(df["profile_text"].tolist())), single_dir / "faiss.index")
+    save_id_map(make_id_map(df), single_dir / "novel_id_map.json")
+    single = load_searchers(single_dir, model, label="s")
+    assert [s.name for s in single] == ["s/dense_single"]
+    assert single[0].search("梅长苏", k=1)[0]["novel_id"] == "c"
+
+    with pytest.raises(ValueError):
+        load_searchers(single_dir, None)
+    with pytest.raises(FileNotFoundError):
+        load_searchers(tmp_path / "empty", model)

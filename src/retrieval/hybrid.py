@@ -7,9 +7,12 @@ tool and the benchmark are indifferent to which configuration sits behind them.
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Protocol
+
+from src.config import DEFAULT_INDEX_DIR
 
 from src.embed import SupportsEncode, encode_queries
 from src.retrieval.bm25 import BM25Index
@@ -115,3 +118,40 @@ class HybridSearcher:
             base = rows_by_id[novel_id]
             output.append({**base, "rank": rank, "score": float(score), "fused_from": [s.name for s in self.searchers]})
         return output
+
+
+def load_searchers(
+    directory: Path = DEFAULT_INDEX_DIR,
+    model: SupportsEncode | None = None,
+    label: str | None = None,
+    hybrid_depth: int = 100,
+) -> list[BookSearcher]:
+    """Every searcher an index directory supports: dense (single or multi, autodetected), BM25, and their hybrid.
+
+    ``model`` is required when the directory holds a dense index. The hybrid is
+    added only when both a dense and a BM25 index are present.
+    """
+
+    label = label or directory.name
+    searchers: list[BookSearcher] = []
+    if (directory / "faiss.index").exists():
+        if model is None:
+            raise ValueError(f"{directory} has a dense index; pass the embedding model")
+        if (directory / "sections.json").exists():
+            searchers.append(MultiVectorSearcher.load(model, directory, name=f"{label}/dense_multi"))
+        else:
+            searchers.append(SingleVectorSearcher.load(model, directory, name=f"{label}/dense_single"))
+    if (directory / "bm25.json").exists():
+        meta = json.loads((directory / "book_meta.json").read_text(encoding="utf-8"))
+        searchers.append(BM25Searcher(BM25Index.load(directory / "bm25.json"), meta, name=f"{label}/bm25"))
+    if not searchers:
+        raise FileNotFoundError(f"No index in {directory}: build one with scripts/30_build_book_indexes.py")
+    if len(searchers) == 2:
+        searchers.append(HybridSearcher(list(searchers), depth=hybrid_depth, name=f"{label}/hybrid_rrf"))
+    return searchers
+
+
+def index_metadata(directory: Path = DEFAULT_INDEX_DIR) -> dict[str, Any]:
+    path = directory / "index_metadata.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+

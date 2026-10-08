@@ -308,7 +308,7 @@ tag `v1-reranker` 指向删除前的最后一个提交。实际处置和计划�
 | `rank llm_matcher explain llm_explain report app_pipeline query_expansion backends streamlit_app` | 删 |
 | `grpo_reward verl_reward sft_data query_synthesis` | 删出运行时；方法与结果在 `docs/v1-reranker/` |
 | 脚本 04–09、13、14、17–23、`serve_teacher.sh` | 删 |
-| 脚本 01、02、03、10、11、12、15、16 | 保留。15 产出规则盲区表，16 产出 `check_term` 运行时要读的词频表，两者原计划删，实际需要 |
+| 脚本 01、02、10、11、12、15、16 | 保留（03 随后被 30 取代并删除）。15 产出规则盲区表，16 产出 `check_term` 运行时要读的词频表，两者原计划删，实际需要 |
 | 对应测试 | 随模块删；transport 测试改名 `test_chat_transport`，JSON 提取测试独立为 `test_llm_json` |
 | 旧 README、`architecture.md`、`evaluation.md` | 移到 `docs/v1-reranker/`，原计划的 `docs/post-training.md` 不单独建 |
 

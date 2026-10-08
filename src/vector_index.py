@@ -12,12 +12,12 @@ import faiss
 import numpy as np
 import pandas as pd
 
-from src.config import INDEX_DIR, PROCESSED_DATA_DIR
+from src.config import DEFAULT_INDEX_DIR, PROCESSED_DATA_DIR
 
 DEFAULT_PROFILES_PATH = PROCESSED_DATA_DIR / "novel_profiles.parquet"
-DEFAULT_INDEX_PATH = INDEX_DIR / "faiss.index"
-DEFAULT_ID_MAP_PATH = INDEX_DIR / "novel_id_map.json"
-DEFAULT_INDEX_METADATA_PATH = INDEX_DIR / "index_metadata.json"
+DEFAULT_INDEX_PATH = DEFAULT_INDEX_DIR / "faiss.index"
+DEFAULT_ID_MAP_PATH = DEFAULT_INDEX_DIR / "novel_id_map.json"
+DEFAULT_INDEX_METADATA_PATH = DEFAULT_INDEX_DIR / "index_metadata.json"
 MIN_PROFILE_TEXT_CHARS = 50
 
 

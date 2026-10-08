@@ -16,8 +16,7 @@ from rich.console import Console
 from src.config import PROJECT_ROOT
 from src.embed import DEFAULT_EMBEDDING_MODEL, load_embedding_model
 from src.retrieval.bench import evaluate, format_table, load_benchmark
-from src.retrieval.bm25 import BM25Index
-from src.retrieval.hybrid import BM25Searcher, HybridSearcher, MultiVectorSearcher, SingleVectorSearcher
+from src.retrieval.hybrid import index_metadata, load_searchers
 
 app = typer.Typer(add_completion=False)
 console = Console()
@@ -40,22 +39,14 @@ def main(
     queries = load_benchmark()
     console.print(f"Benchmark: {len(queries)} queries, {sum(len(q.anchors) for q in queries)} anchors, {sum(len(q.strong) for q in queries)} strong pairs")
 
-    searchers = []
-    metadata_path = index_dir / "index_metadata.json"
-    if metadata_path.exists():
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata = index_metadata(index_dir)
+    embedder = None
+    if (index_dir / "faiss.index").exists():
         embedder = load_embedding_model(model or metadata["model_name"], device=device, dtype=dtype or metadata.get("dtype", "fp32"))
-        if (index_dir / "sections.json").exists():
-            searchers.append(MultiVectorSearcher.load(embedder, index_dir, name=f"{label}/dense_multi"))
-        else:
-            searchers.append(SingleVectorSearcher.load(embedder, index_dir, name=f"{label}/dense_single"))
-    if (index_dir / "bm25.json").exists():
-        meta = json.loads((index_dir / "book_meta.json").read_text(encoding="utf-8"))
-        searchers.append(BM25Searcher(BM25Index.load(index_dir / "bm25.json"), meta, name=f"{label}/bm25"))
-    if not searchers:
-        raise typer.BadParameter(f"Nothing to evaluate in {index_dir}")
-    if len(searchers) == 2:
-        searchers.append(HybridSearcher(list(searchers), depth=hybrid_depth, name=f"{label}/hybrid_rrf"))
+    try:
+        searchers = load_searchers(index_dir, embedder, label=label, hybrid_depth=hybrid_depth)
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
     results = []
     for searcher in searchers:

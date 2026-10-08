@@ -15,7 +15,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from src.config import INDEX_DIR
+from src.config import DEFAULT_INDEX_DIR
 from src.embed import DEFAULT_BATCH_SIZE, DEFAULT_EMBEDDING_MODEL, encode_documents_with_backoff, load_embedding_model
 from src.retrieval.bm25 import BM25Index
 from src.retrieval.multivector import MultiVectorIndex, build_section_table, make_book_meta, section_stats
@@ -36,7 +36,7 @@ console = Console()
 
 @app.command()
 def main(
-    out_dir: Path = typer.Option(INDEX_DIR / "multi_0p6b", help="Directory for this configuration's artifacts."),
+    out_dir: Path = typer.Option(DEFAULT_INDEX_DIR, help="Directory for this configuration's artifacts."),
     profiles: Path = typer.Option(DEFAULT_PROFILES_PATH, help="Novel profiles parquet."),
     dense: str = typer.Option("multi", help="single | multi | none"),
     bm25: bool = typer.Option(True, "--bm25/--no-bm25", help="Also build a BM25 index over the full profile text."),

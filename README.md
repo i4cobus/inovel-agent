@@ -11,7 +11,7 @@
 | `src/agent/` | agent loop、六个工具、单用户记忆、上下文预算、带脱敏的结构化轨迹 |
 | `src/retrieval/` | 多向量书籍索引、自实现 BM25、RRF 混合、检索基准 |
 | `src/` | 保留下来的检索原语（ingest、profile、embed、vector_index、search）、约束规则（`preferences.py`）、证据采样（`evidence.py`）、judge 与校准（`judge.py`、`evaluation.py`）、OpenAI 兼容 transport（`chat_transport.py`） |
-| `scripts/` | 01–03 建语料、profile、索引；10–12 标注与划分；15–16 规则盲区与词频表；30–31 建书籍级索引与跑检索基准 |
+| `scripts/` | 01–02 建语料与 profile；10–12 标注与划分；15–16 规则盲区与词频表；30–31 建书籍级索引与跑检索基准 |
 | `eval/` | 旧评测查询、人工标注、以及 `eval/results/` 下每个 arm 的判分行 |
 | `docs/agent-plan.md` | 设计文档：目标、取舍、架构、评测、分期 |
 | `docs/v1-reranker/` | 重排器后训练（SFT + GRPO）的说明、方法与结果 |
