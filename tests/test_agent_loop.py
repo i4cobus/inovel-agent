@@ -66,10 +66,11 @@ def test_tool_call_then_finish_records_two_steps_and_structured_answer() -> None
 
     # The tool result went back to the model as a tool message tied to the call id.
     second_call_messages = model.seen[1]
-    assert second_call_messages[-1]["role"] == "tool"
-    assert second_call_messages[-1]["tool_call_id"] == "c1"
-    assert json.loads(second_call_messages[-1]["content"]) == {"echoed": "hi"}
+    last_tool = [m for m in second_call_messages if m["role"] == "tool"][-1]
+    assert last_tool["tool_call_id"] == "c1"
+    assert json.loads(last_tool["content"]) == {"echoed": "hi"}
     assert second_call_messages[0]["role"] == "system"
+    assert second_call_messages[-1]["content"].startswith("[系统提示：还剩")
 
 
 def test_tool_error_becomes_an_observation_not_a_crash() -> None:
@@ -128,11 +129,28 @@ def test_identical_consecutive_calls_terminate_as_loop() -> None:
     assert "重复调用" in run.trajectory.steps[1].observations[0].error
 
 
-def test_step_budget_exhaustion_is_recorded() -> None:
+def test_step_budget_exhaustion_is_recorded_after_a_forced_finish_prompt() -> None:
+    from src.agent.loop import LAST_STEP, steps_hint
+
     model = ScriptedModel([turn(calls=(call("echo", {"text": str(i)}),)) for i in range(3)])
     run = AgentLoop(model, registry_with_echo(), config=AgentConfig(max_steps=3)).run("x")
     assert run.trajectory.termination == "max_steps"
     assert run.trajectory.step_count == 3
+    assert model.seen[1][-1] == {"role": "user", "content": steps_hint(2)}
+    assert model.seen[2][-1] == {"role": "user", "content": LAST_STEP}
+
+
+def test_old_tool_results_are_compacted_but_the_trajectory_keeps_them() -> None:
+    turns = [turn(calls=(call("echo", {"text": "x" * 299 + str(i)}, f"c{i}"),)) for i in range(4)] + [turn(calls=(call("finish", {"answer": "ok"}),))]
+    model = ScriptedModel(turns)
+    config = AgentConfig(max_steps=10, budget=ContextBudget(keep_recent_tool_results=2))
+    run = AgentLoop(model, registry_with_echo(), config=config).run("x")
+    sent = model.seen[-1]
+    tool_messages = [m for m in sent if m["role"] == "tool"]
+    assert len(tool_messages) == 4
+    assert all(len(m["content"]) < 120 for m in tool_messages[:2])  # compacted
+    assert all("x" * 299 in m["content"] for m in tool_messages[2:])  # recent ones verbatim
+    assert run.trajectory.steps[0].observations[0].result == {"echoed": "x" * 299 + "0"}
 
 
 def test_model_failure_is_recorded_and_nothing_is_invented() -> None:
@@ -154,7 +172,7 @@ def test_tool_results_are_truncated_to_the_budget() -> None:
     model = ScriptedModel([turn(calls=(call("echo", {"text": "x" * 500}),)), turn(calls=(call("finish", {"answer": "ok"}),))])
     config = AgentConfig(budget=ContextBudget(tool_result_chars=100))
     AgentLoop(model, registry_with_echo(), config=config).run("x")
-    assert len(model.seen[1][-1]["content"]) == 100
+    assert len([m for m in model.seen[1] if m["role"] == "tool"][-1]["content"]) == 100
 
 
 def test_extract_trailing_json_takes_the_last_object() -> None:

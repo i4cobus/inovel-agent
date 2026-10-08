@@ -184,3 +184,16 @@ def test_search_books_prefers_the_synopsis_preview_from_profiles() -> None:
     assert rows[0]["preview"] == "作者：某人\n凡人修仙的故事。"
     assert rows[1]["preview"].startswith("简介")  # unknown to the profile table: falls back to the stored preview
 
+
+def test_compact_tool_message_keeps_ids_and_titles_only() -> None:
+    from src.agent.context import compact_tool_message
+
+    rows = json.dumps([{"novel_id": "n1", "title": "书一", "preview": "很长" * 200, "score": 0.5}], ensure_ascii=False)
+    compact = compact_tool_message(rows, "search_books")
+    assert compact.startswith("[已压缩的检索结果") and "n1|书一" in compact and "很长很长很长" not in compact
+    profile = json.dumps({"novel_id": "n1", "title": "书一", "profile": "正文" * 500}, ensure_ascii=False)
+    assert len(compact_tool_message(profile, "get_profile")) < 220
+    trope = json.dumps({"verdict": "yes", "quotes": ["引文"], "confidence": "high"}, ensure_ascii=False)
+    assert "引文" not in compact_tool_message(trope, "check_trope") and "yes" in compact_tool_message(trope, "check_trope")
+    assert compact_tool_message("not json " * 50, "x").endswith("…[截断]")
+

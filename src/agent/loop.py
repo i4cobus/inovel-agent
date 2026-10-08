@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.agent.context import ContextBudget, build_system_prompt, render_tool_result
+from src.agent.context import ContextBudget, build_system_prompt, compact_messages, render_tool_result
 from src.agent.memory import UserMemory
 from src.agent.tools import ToolError, ToolRegistry
 from src.agent.trajectory import Observation, Step, Trajectory
@@ -71,6 +71,11 @@ FINISH_SCHEMA: dict[str, Any] = {
     },
 }
 NUDGE = "你刚才没有调用任何工具，也没有用 finish 结束。请继续：需要更多信息就调用工具，信息够了就调用 finish 给出最终回答。"
+LAST_STEP = "这是最后一步，步数已用尽。现在必须调用 finish，用已经掌握的信息给出最终回答；没能确认的偏好在 answer 里说明。"
+
+
+def steps_hint(remaining: int) -> str:
+    return f"[系统提示：还剩 {remaining} 步]"
 
 
 @dataclass(frozen=True)
@@ -152,10 +157,18 @@ class AgentLoop:
         last_content = ""
         text_only_streak = 0
 
+        tool_names: dict[str, str] = {}
         for index in range(self.config.max_steps):
+            remaining = self.config.max_steps - index
+            if remaining == 1:
+                messages.append({"role": "user", "content": LAST_STEP})
+            elif index > 0 and messages[-1].get("role") == "tool":
+                messages.append({"role": "user", "content": steps_hint(remaining)})
             started = time.perf_counter()
             try:
-                response = self.model.chat(messages, schemas, self.config.max_tokens)
+                response = self.model.chat(
+                    compact_messages(messages, tool_names, budget.keep_recent_tool_results), schemas, self.config.max_tokens
+                )
             except Exception as exc:  # noqa: BLE001 - recorded, not guessed around
                 trajectory.termination = "model_error"
                 trajectory.metadata["error"] = f"{type(exc).__name__}: {exc}"
@@ -188,6 +201,7 @@ class AgentLoop:
             finished = False
             looped = False
             for call in response.tool_calls:
+                tool_names[call.id] = call.name
                 signature = (call.name, json.dumps(call.arguments, ensure_ascii=False, sort_keys=True))
                 observation = Observation(tool=call.name, call_id=call.id, arguments=call.arguments)
                 call_started = time.perf_counter()
