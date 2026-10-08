@@ -141,16 +141,16 @@ def test_step_budget_exhaustion_is_recorded_after_a_forced_finish_prompt() -> No
 
 
 def test_old_tool_results_are_compacted_but_the_trajectory_keeps_them() -> None:
-    turns = [turn(calls=(call("echo", {"text": "x" * 299 + str(i)}, f"c{i}"),)) for i in range(4)] + [turn(calls=(call("finish", {"answer": "ok"}),))]
+    turns = [turn(calls=(call("echo", {"text": "x" * 599 + str(i)}, f"c{i}"),)) for i in range(4)] + [turn(calls=(call("finish", {"answer": "ok"}),))]
     model = ScriptedModel(turns)
     config = AgentConfig(max_steps=10, budget=ContextBudget(keep_recent_tool_results=2))
     run = AgentLoop(model, registry_with_echo(), config=config).run("x")
     sent = model.seen[-1]
     tool_messages = [m for m in sent if m["role"] == "tool"]
     assert len(tool_messages) == 4
-    assert all(len(m["content"]) < 120 for m in tool_messages[:2])  # compacted
-    assert all("x" * 299 in m["content"] for m in tool_messages[2:])  # recent ones verbatim
-    assert run.trajectory.steps[0].observations[0].result == {"echoed": "x" * 299 + "0"}
+    assert all(len(m["content"]) <= 400 for m in tool_messages[:2])  # compacted (generic fallback: 400 chars)
+    assert all("x" * 599 in m["content"] for m in tool_messages[2:])  # recent ones verbatim
+    assert run.trajectory.steps[0].observations[0].result == {"echoed": "x" * 599 + "0"}
 
 
 def test_model_failure_is_recorded_and_nothing_is_invented() -> None:
