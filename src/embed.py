@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import math
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -285,10 +287,10 @@ def encode_documents_with_backoff(
             if not is_out_of_memory(exc) or batch_size <= min_batch_size:
                 raise
             batch_size = max(batch_size // 2, min_batch_size)
-            try:
-                import torch
-
+            # Only touch torch if the caller already loaded it: importing it here would
+            # pull a second OpenMP runtime next to faiss-cpu on macOS, which aborts the
+            # process the next time faiss searches (seen in the test suite).
+            torch = sys.modules.get("torch")
+            if torch is not None and torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            except Exception:  # noqa: BLE001 - best effort
-                pass
 
