@@ -25,6 +25,9 @@ def test_constrained_tasks_are_stratified_deterministic_and_well_formed() -> Non
         message = task.sessions[0].user_message
         assert all(neg in message for neg in task.negatives_in_text + task.negatives_meta)
         assert task.sessions[0].expect == {"min_recommendations": 3}
+        from src.agent_eval.tasks import GENRE_INCOMPATIBLE
+
+        assert not set(task.negatives_in_text) & GENRE_INCOMPATIBLE.get(task.positives[0], set())
 
 
 def test_memory_tasks_cycle_variants_with_expectations() -> None:

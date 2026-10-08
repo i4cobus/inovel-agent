@@ -33,11 +33,19 @@ POSITIVE_THEMES: dict[str, list[str]] = {
     "武侠": ["江湖恩怨", "快意恩仇", "武功体系严谨", "侠义"],
     "科幻": ["硬科幻", "太空歌剧", "文明冲突", "生存进化", "设定精巧"],
     "悬疑": ["推理", "氛围感强", "慢热", "反转多"],
-    "游戏": ["升级流", "公会争霸", "策略", "热血"],
+    "网游": ["升级流", "公会争霸", "策略", "热血"],
     "种田": ["经营", "慢节奏", "治愈", "家长里短"],
     "西幻": ["冒险", "小队成长", "世界观完整", "骑士与法师"],
 }
 IN_TEXT_POOL = sorted(IN_TEXT_NEGATIVES - {"恋爱", "校园"})  # the two read as topics, not tropes, in a negation
+# Negatives that contradict the genre itself make no sense as a task (仙侠 + 不要修仙).
+GENRE_INCOMPATIBLE: dict[str, set[str]] = {
+    "仙侠": {"修仙", "修真"},
+    "玄幻": {"修仙", "修真"},
+    "网游": {"系统"},
+    "科幻": {"机甲"},
+    "西幻": set(),
+}
 META_POOL = sorted(META_LABEL_NEGATIVES - {"玄幻", "言情", "灵异", "超能力", "克苏鲁"})  # genres, not tropes
 
 NEGATION_PHRASES = ["不要{neg}", "别给我带{neg}的", "{neg}的不看", "不要{neg}那种", "排除{neg}"]
@@ -108,12 +116,13 @@ def synthesize_constrained(n: int, seed: int = 0, id_prefix: str = "rec") -> lis
         stratum = strata[index % 3]
         genre = rng.choice(sorted(POSITIVE_THEMES))
         feats = rng.sample(POSITIVE_THEMES[genre], k=rng.randint(1, 3))
+        in_text_pool = [t for t in IN_TEXT_POOL if t not in GENRE_INCOMPATIBLE.get(genre, set())]
         if stratum == "in_text":
-            in_text, meta = rng.sample(IN_TEXT_POOL, k=rng.randint(1, 2)), []
+            in_text, meta = rng.sample(in_text_pool, k=rng.randint(1, 2)), []
         elif stratum == "meta":
             in_text, meta = [], rng.sample(META_POOL, k=rng.randint(1, 2))
         else:
-            in_text, meta = [rng.choice(IN_TEXT_POOL)], [rng.choice(META_POOL)]
+            in_text, meta = [rng.choice(in_text_pool)], [rng.choice(META_POOL)]
         negs = in_text + meta
         rng.shuffle(negs)
         tasks.append(
@@ -149,7 +158,8 @@ def synthesize_memory(n: int, seed: int = 0, id_prefix: str = "mem") -> list[Tas
     for index in range(n):
         variant = variants[index % 3]
         genres = rng.sample(sorted(POSITIVE_THEMES), k=2)
-        terms = rng.sample(IN_TEXT_POOL, k=2)
+        blocked = GENRE_INCOMPATIBLE.get(genres[0], set()) | GENRE_INCOMPATIBLE.get(genres[1], set())
+        terms = rng.sample([t for t in IN_TEXT_POOL if t not in blocked], k=2)
         task_id = f"{id_prefix}-{index:03d}"
         if variant == "persist":
             sessions = [
