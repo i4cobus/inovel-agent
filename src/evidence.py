@@ -6,9 +6,9 @@ profile match the query", not "does this *book* match the query", and would
 inherit every sampling error the system made. That is circular, and it would hide
 exactly the failures evaluation exists to find.
 
-So judge evidence is drawn from chapters the profile did **not** use. Both sides
-call ``profile_chapter_indices``: the profile to pick its chapters, this module to
-avoid them. Which of the remaining chapters get picked is derived from the novel
+So judge evidence is drawn from chapters the digest did **not** use (the opening,
+ending and middle chapters ``digest_chapter_indices`` names), which with the
+digest's opening-and-ending weighting means the judge reads the middle. Which of the remaining chapters get picked is derived from the novel
 id, so a book always yields the same evidence across runs — verdict caching keys
 on the evidence, and re-sampling would silently invalidate it.
 
@@ -72,10 +72,15 @@ def judge_chapter_indices(
     chapter per band, and a band with few chapters can collide.
     """
 
+    from src.digest import digest_chapter_indices
+
     usable = substantive_chapter_indices(chapters)
     if len(usable) < MIN_CHAPTERS_FOR_SAMPLING or windows <= 0:
         return []
-    used = {usable[position] for position in profile_chapter_indices(len(usable), samples=profile_samples)}
+    roles = digest_chapter_indices(chapters)
+    used = set(roles["opening"]) | set(roles["middle"]) | set(roles["ending"])
+    if not used:  # a book the digest fell back to character windows on: avoid the old profile picks
+        used = {usable[position] for position in profile_chapter_indices(len(usable), samples=profile_samples)}
     available = [index for index in usable if index not in used]
     if not available:
         # Tiny books: every real chapter feeds the profile. Independence is

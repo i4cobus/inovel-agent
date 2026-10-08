@@ -265,16 +265,16 @@ def test_empty_task_list_is_free() -> None:
     assert summary.requested == 0
 
 
-def test_judge_evidence_avoids_the_chapters_the_profile_used() -> None:
-    """Both sides read the same substantive-chapter view: one uses, one avoids."""
+def test_judge_evidence_avoids_the_chapters_the_digest_used() -> None:
+    """Both sides read the same chapter view: the digest uses opening, middle and ending; the judge avoids them."""
 
+    from src.digest import digest_chapter_indices
     from src.evidence import judge_chapter_indices
-    from src.profile import profile_chapter_indices, substantive_chapter_indices
 
     for count in (40, 120, 663):
         chapters = [_Chapter("正文内容。" * 100, f"第{i}章") for i in range(count)]
-        usable = substantive_chapter_indices(chapters)
-        used = {usable[position] for position in profile_chapter_indices(len(usable))}
+        roles = digest_chapter_indices(chapters)
+        used = set(roles["opening"]) | set(roles["middle"]) | set(roles["ending"])
         judged = judge_chapter_indices("n0", chapters)
         assert judged, count
         assert not used & set(judged), count

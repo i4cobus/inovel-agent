@@ -59,14 +59,19 @@ def split_profile_sections(profile_text: str) -> list[Section]:
 
 
 def build_section_table(profiles: pd.DataFrame, card_texts: dict[str, str] | None = None) -> tuple[list[str], list[SectionRecord]]:
-    """One row per section. With ``card_texts`` (novel_id -> card text) a book also gets a "card" section,
-    prefixed with its title so title queries still land on it."""
+    """One row per section. A digest table carries its sections explicitly (``sections_json``); an old
+    profile table is split by its markers. With ``card_texts`` (novel_id -> card text) a book also gets
+    a "card" section, prefixed with its title so title queries still land on it."""
 
     texts: list[str] = []
     records: list[SectionRecord] = []
+    explicit = "sections_json" in profiles.columns
     for row in profiles.itertuples(index=False):
         novel_id = str(row.novel_id)
-        sections = split_profile_sections(str(row.profile_text))
+        if explicit:
+            sections = [Section(str(s["kind"]), str(s["text"])) for s in json.loads(str(row.sections_json))]
+        else:
+            sections = split_profile_sections(str(row.profile_text))
         card = (card_texts or {}).get(novel_id)
         if card:
             sections.append(Section("card", f"标题：{row.title_guess}\n{card}"))

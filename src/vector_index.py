@@ -14,7 +14,7 @@ import pandas as pd
 
 from src.config import DEFAULT_INDEX_DIR, PROCESSED_DATA_DIR
 
-DEFAULT_PROFILES_PATH = PROCESSED_DATA_DIR / "novel_profiles.parquet"
+DEFAULT_PROFILES_PATH = PROCESSED_DATA_DIR / "novel_digests.parquet"  # the digest replaced the profile on 2026-10-09
 DEFAULT_INDEX_PATH = DEFAULT_INDEX_DIR / "faiss.index"
 DEFAULT_ID_MAP_PATH = DEFAULT_INDEX_DIR / "novel_id_map.json"
 DEFAULT_INDEX_METADATA_PATH = DEFAULT_INDEX_DIR / "index_metadata.json"
