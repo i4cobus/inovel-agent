@@ -215,8 +215,11 @@ class HTTPChatTransport:
                 response = self.client.post(url, json=payload)
                 if response.status_code in RETRY_STATUS_CODES:
                     last_error = RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
+                elif response.status_code >= 400:
+                    # A 4xx is the server rejecting the request, not a transient failure:
+                    # keep its body, which is the only place the reason is stated.
+                    raise RuntimeError(f"HTTP {response.status_code} from {url}: {response.text[:600]}")
                 else:
-                    response.raise_for_status()
                     return response.json()
             except httpx.HTTPError as exc:
                 last_error = exc

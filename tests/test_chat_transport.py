@@ -83,3 +83,17 @@ def test_chat_payload_carries_tools_and_parses_tool_calls() -> None:
     assert response.tool_calls[1].arguments is None and response.tool_calls[1].raw_arguments == "{broken"
     assert response.tool_calls[2].arguments == {"y": 2} and response.tool_calls[2].id == "call_2"
     assert response.usage.prompt_tokens == 3
+
+
+def test_client_errors_surface_the_response_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    transport = HTTPChatTransport(model="m", base_url="http://127.0.0.1:1/v1", max_retries=2, backoff_seconds=0)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": {"message": "prompt exceeds context"}})
+
+    transport._client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(RuntimeError, match="HTTP 400 .*prompt exceeds context"):
+        transport.post_chat({"model": "m", "messages": []})
+
