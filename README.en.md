@@ -16,6 +16,7 @@ Corpus: 7,653 Chinese web novels, about 36 GB of plain text, private, not in git
 | `eval/` | the frozen v1 queries, human annotations, and under `eval/results/` the judged rows of every v1 arm |
 | `docs/agent-plan.md` | the design document: goals and trade-offs, architecture, evaluation, phases |
 | `docs/retrieval-bench.md` | the book-level retrieval benchmark: configurations, numbers, provenance, decision |
+| `docs/first-trajectories.md` | the first real trajectories: ten runs, three rounds of fixes, current state |
 | `docs/v1-reranker/` | the reranker post-training work (SFT + GRPO): method, notes and results |
 
 Retrieval and RAG are the technical core: the corpus is raw text with no tags or

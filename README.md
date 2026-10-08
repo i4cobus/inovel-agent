@@ -15,6 +15,7 @@
 | `eval/` | 旧评测查询、人工标注、以及 `eval/results/` 下每个 arm 的判分行 |
 | `docs/agent-plan.md` | 设计文档：目标、取舍、架构、评测、分期 |
 | `docs/retrieval-bench.md` | 书籍级检索基准：配置、数字、出处、决定 |
+| `docs/first-trajectories.md` | 首批真实轨迹：十次运行、三轮修改、现状 |
 | `docs/v1-reranker/` | 重排器后训练（SFT + GRPO）的说明、方法与结果 |
 
 技术核心是检索与 RAG：语料是没有任何标签的原始文本，结构化信号都要在建索引时提炼。
