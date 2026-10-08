@@ -22,8 +22,8 @@ app = typer.Typer(add_completion=False)
 
 SWEEPS: dict[str, list[dict[str, object]]] = {
     "0p6b": [
-        {"name": "single_0p6b", "model": "Qwen/Qwen3-Embedding-0.6B", "dense": "single", "dtype": "fp32", "batch_size": 8},
-        {"name": "multi_0p6b", "model": "Qwen/Qwen3-Embedding-0.6B", "dense": "multi", "dtype": "fp32", "batch_size": 128},
+        {"name": "single_0p6b", "model": "Qwen/Qwen3-Embedding-0.6B", "dense": "single", "dtype": "bf16", "batch_size": 16},
+        {"name": "multi_0p6b", "model": "Qwen/Qwen3-Embedding-0.6B", "dense": "multi", "dtype": "bf16", "batch_size": 64},
     ],
     "4b": [
         {"name": "single_4b", "model": "Qwen/Qwen3-Embedding-4B", "dense": "single", "dtype": "bf16", "batch_size": 4},
