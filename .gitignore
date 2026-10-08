@@ -18,6 +18,7 @@ eval/results/*
 eval/results/*/*
 !eval/results/*/eval_results_judged.csv
 !eval/results/*/eval_run_config.json
+!eval/results/retrieval_bench/results.jsonl
 eval/manual_judgements.csv
 # Annotation sheets inline raw novel excerpts from the private corpus.
 eval/manual_judgements_sheet.csv

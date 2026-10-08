@@ -7,7 +7,7 @@ import pytest
 from src.retrieval.bm25 import BM25Index
 from src.retrieval.hybrid import SingleVectorSearcher, load_searchers
 from src.retrieval.multivector import MultiVectorIndex, SectionRecord
-from src.retrieval.pooling import derive_single_index, parse_weights, pool_book_vectors, reconstruct_vectors
+from src.retrieval.pooling import DEFAULT_SECTION_WEIGHTS, derive_single_index, parse_weights, pool_book_vectors, reconstruct_vectors
 
 
 def unit(*values: float) -> np.ndarray:
@@ -45,6 +45,11 @@ def test_pool_book_vectors_applies_kind_weights_and_never_drops_a_book() -> None
 def test_pool_book_vectors_rejects_mismatch() -> None:
     with pytest.raises(ValueError):
         pool_book_vectors(VECTORS[:3], RECORDS)
+
+
+def test_default_weights_name_real_digest_kinds() -> None:
+    assert set(DEFAULT_SECTION_WEIGHTS) <= {"blurb", "opening", "titles", "middle", "ending", "card"}
+    assert all(w > 0 for w in DEFAULT_SECTION_WEIGHTS.values())
 
 
 def test_parse_weights() -> None:

@@ -21,6 +21,12 @@ import numpy as np
 from src.retrieval.multivector import INDEX_FILE, META_FILE, SECTIONS_FILE, MultiVectorIndex, SectionRecord
 from src.vector_index import build_faiss_index, ensure_can_write, save_faiss_index, save_id_map, save_index_metadata
 
+# Chosen on 2026-10-09 over six weightings benchmarked on the Mac (docs/retrieval-bench.md, round 2):
+# the blurb and the chapter-title list are the densest summaries of a book, the 600-char middle
+# windows the noisiest. Differences between weightings are one or two anchors; this one had the
+# fewest anchors missing from the top 1000 (16 of 55) and the best Recall@20 among those.
+DEFAULT_SECTION_WEIGHTS: dict[str, float] = {"blurb": 3.0, "titles": 3.0, "middle": 0.5}
+
 BM25_FILE = "bm25.json"
 BOOK_META_FILE = "book_meta.json"
 ID_MAP_FILE = "novel_id_map.json"
