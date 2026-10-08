@@ -16,7 +16,7 @@ import typer
 from rich.console import Console
 
 from src.config import INDEX_DIR
-from src.embed import DEFAULT_BATCH_SIZE, DEFAULT_EMBEDDING_MODEL, encode_documents, load_embedding_model
+from src.embed import DEFAULT_BATCH_SIZE, DEFAULT_EMBEDDING_MODEL, encode_documents_with_backoff, load_embedding_model
 from src.retrieval.bm25 import BM25Index
 from src.retrieval.multivector import MultiVectorIndex, build_section_table, make_book_meta
 from src.vector_index import (
@@ -72,13 +72,13 @@ def main(
         embedder = load_embedding_model(model, device=device, dtype=dtype)
         started = time.perf_counter()
         if dense == "single":
-            embeddings = encode_documents(embedder, frame["profile_text"].tolist(), batch_size=batch_size)
+            embeddings, used_batch = encode_documents_with_backoff(embedder, frame["profile_text"].tolist(), batch_size=batch_size)
             save_faiss_index(build_faiss_index(embeddings), out_dir / "faiss.index")
             save_id_map(make_id_map(frame), out_dir / "novel_id_map.json")
             vectors = int(embeddings.shape[0])
         else:
             texts, records = build_section_table(frame)
-            embeddings = encode_documents(embedder, texts, batch_size=batch_size)
+            embeddings, used_batch = encode_documents_with_backoff(embedder, texts, batch_size=batch_size)
             MultiVectorIndex.build(embeddings, records, make_book_meta(frame)).save(out_dir)
             vectors = len(records)
         metadata = make_index_metadata(
@@ -86,8 +86,9 @@ def main(
         )
         metadata["dense"] = dense
         metadata["dtype"] = dtype
+        metadata["batch_size"] = used_batch
         save_index_metadata(metadata, out_dir / "index_metadata.json")
-        summary["dense"] = {"mode": dense, "model": model, "vectors": vectors, "dim": int(embeddings.shape[1]), "seconds": round(time.perf_counter() - started, 1)}
+        summary["dense"] = {"mode": dense, "model": model, "vectors": vectors, "dim": int(embeddings.shape[1]), "batch_size": used_batch, "seconds": round(time.perf_counter() - started, 1)}
         console.print(f"Dense ({dense}): {vectors} vectors × {embeddings.shape[1]}, {summary['dense']['seconds']}s")
 
     (out_dir / "build_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

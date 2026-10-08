@@ -75,3 +75,31 @@ def test_pool_is_only_forwarded_when_provided() -> None:
     assert "pool" not in without_pool
     assert with_pool["pool"] == {"sentinel": True}
     assert with_pool["chunk_size"] == 64
+
+
+def test_encode_backoff_halves_the_batch_on_oom() -> None:
+    from src.embed import encode_documents_with_backoff
+
+    class OOMUntil:
+        def __init__(self, fits_at: int) -> None:
+            self.fits_at, self.seen = fits_at, []
+
+        def encode(self, texts: list[str], **kwargs: object) -> np.ndarray:
+            self.seen.append(kwargs["batch_size"])
+            if kwargs["batch_size"] > self.fits_at:
+                raise RuntimeError("CUDA out of memory. Tried to allocate 1.16 GiB")
+            return np.ones((len(texts), 2), dtype=np.float32)
+
+    model = OOMUntil(fits_at=16)
+    _, used = encode_documents_with_backoff(model, ["a", "b"], batch_size=128)
+    assert used == 16 and model.seen == [128, 64, 32, 16]
+
+    with pytest.raises(RuntimeError, match="out of memory"):
+        encode_documents_with_backoff(OOMUntil(fits_at=0), ["a"], batch_size=2, min_batch_size=1)
+
+    class OtherError:
+        def encode(self, texts: list[str], **kwargs: object) -> np.ndarray:
+            raise RuntimeError("something else")
+
+    with pytest.raises(RuntimeError, match="something else"):
+        encode_documents_with_backoff(OtherError(), ["a"], batch_size=8)

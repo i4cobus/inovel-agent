@@ -258,3 +258,37 @@ def encode_documents_multi_gpu(
                     progress(device)
 
         return ensure_float32_2d(np.concatenate([np.load(job[5]) for job in jobs], axis=0))
+
+
+def is_out_of_memory(exc: BaseException) -> bool:
+    return isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower()
+
+
+def encode_documents_with_backoff(
+    model: SupportsEncode,
+    texts: list[str],
+    batch_size: int,
+    min_batch_size: int = 1,
+    show_progress_bar: bool = True,
+) -> tuple[np.ndarray, int]:
+    """Encode documents, halving the batch on CUDA OOM until it fits.
+
+    Profiles run to 8,000 characters and sections to 700, so no single batch
+    size suits both; the 4080's usable 14.4 GiB makes the wrong guess fatal
+    minutes into a build. Returns the embeddings and the batch size that worked.
+    """
+
+    while True:
+        try:
+            return encode_documents(model, texts, batch_size=batch_size, show_progress_bar=show_progress_bar), batch_size
+        except RuntimeError as exc:
+            if not is_out_of_memory(exc) or batch_size <= min_batch_size:
+                raise
+            batch_size = max(batch_size // 2, min_batch_size)
+            try:
+                import torch
+
+                torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001 - best effort
+                pass
+
