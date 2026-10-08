@@ -30,6 +30,7 @@ def main(
     label: str | None = typer.Option(None, help="Config label prefix; defaults to the directory name."),
     model: str | None = typer.Option(None, help="Embedding model; defaults to the one recorded in index_metadata.json."),
     device: str | None = typer.Option(None),
+    dtype: str | None = typer.Option(None, help="Defaults to the dtype recorded at build time."),
     depth: int = typer.Option(1000, help="Ranking depth per query; anchors beyond it count as unfound."),
     recall_k: int = typer.Option(20),
     hybrid_depth: int = typer.Option(100, help="Candidates each searcher contributes to RRF."),
@@ -43,7 +44,7 @@ def main(
     metadata_path = index_dir / "index_metadata.json"
     if metadata_path.exists():
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        embedder = load_embedding_model(model or metadata["model_name"], device=device)
+        embedder = load_embedding_model(model or metadata["model_name"], device=device, dtype=dtype or metadata.get("dtype", "fp32"))
         if (index_dir / "sections.json").exists():
             searchers.append(MultiVectorSearcher.load(embedder, index_dir, name=f"{label}/dense_multi"))
         else:

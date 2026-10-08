@@ -42,6 +42,7 @@ def main(
     bm25: bool = typer.Option(True, "--bm25/--no-bm25", help="Also build a BM25 index over the full profile text."),
     model: str = typer.Option(DEFAULT_EMBEDDING_MODEL, help="SentenceTransformer model for the dense index."),
     device: str | None = typer.Option(None, help="torch device, e.g. cuda:0 or cpu."),
+    dtype: str = typer.Option("fp32", help="fp32 | bf16 | fp16; bf16 for the 4B model on a 16 GB card."),
     batch_size: int = typer.Option(DEFAULT_BATCH_SIZE),
     limit: int | None = typer.Option(None, help="First N profiles only (smoke run)."),
     overwrite: bool = typer.Option(False),
@@ -68,7 +69,7 @@ def main(
         console.print(f"BM25: {index.size} docs, vocab {len(index.postings)}, {summary['bm25']['seconds']}s")
 
     if dense != "none":
-        embedder = load_embedding_model(model, device=device)
+        embedder = load_embedding_model(model, device=device, dtype=dtype)
         started = time.perf_counter()
         if dense == "single":
             embeddings = encode_documents(embedder, frame["profile_text"].tolist(), batch_size=batch_size)
@@ -84,6 +85,7 @@ def main(
             model_name=model, embedding_dim=int(embeddings.shape[1]), num_vectors=vectors, normalize_embeddings=True, source_profiles=profiles
         )
         metadata["dense"] = dense
+        metadata["dtype"] = dtype
         save_index_metadata(metadata, out_dir / "index_metadata.json")
         summary["dense"] = {"mode": dense, "model": model, "vectors": vectors, "dim": int(embeddings.shape[1]), "seconds": round(time.perf_counter() - started, 1)}
         console.print(f"Dense ({dense}): {vectors} vectors × {embeddings.shape[1]}, {summary['dense']['seconds']}s")

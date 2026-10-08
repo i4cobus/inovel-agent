@@ -38,17 +38,31 @@ class SupportsEncode(Protocol):
         """Encode text strings into dense vectors."""
 
 
+DTYPES = ("fp32", "bf16", "fp16")
+
+
 def load_embedding_model(
     model_name: str = DEFAULT_EMBEDDING_MODEL,
     device: str | None = None,
+    dtype: str = "fp32",
 ) -> SentenceTransformer:
-    """Load a SentenceTransformer embedding model once per process."""
+    """Load a SentenceTransformer embedding model once per process.
+
+    ``dtype`` matters on a 16 GB card: Qwen3-Embedding-4B is 16 GB in fp32 and
+    8 GB in bf16, and sentence-transformers loads fp32 unless told otherwise.
+    """
 
     from sentence_transformers import SentenceTransformer
 
+    if dtype not in DTYPES:
+        raise ValueError(f"dtype must be one of {DTYPES}, got {dtype!r}")
     kwargs: dict[str, Any] = {"trust_remote_code": True}
     if device:
         kwargs["device"] = device
+    if dtype != "fp32":
+        import torch
+
+        kwargs["model_kwargs"] = {"torch_dtype": torch.bfloat16 if dtype == "bf16" else torch.float16}
     return SentenceTransformer(model_name, **kwargs)
 
 
