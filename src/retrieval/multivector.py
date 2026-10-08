@@ -87,9 +87,28 @@ def section_stats(records: list[SectionRecord]) -> dict[str, float]:
     }
 
 
+def synopsis_preview(profile_text: str, preview_chars: int = 300) -> str:
+    """The author's synopsis (plus author line), not the profile header.
+
+    The first 300 characters of a profile are 标题 / 作者 / 长度 / 章节数 and then
+    the synopsis; a preview cut there spends most of its budget on metadata the
+    agent can read from the title anyway (seen in the first real trajectory,
+    2026-10-08). Falls back to the raw start when there is no synopsis marker.
+    """
+
+    text = profile_text.strip()
+    head, sep, rest = text.partition(BLURB_MARKER)
+    if not sep:
+        return text[:preview_chars]
+    author = next((line for line in head.split("\n") if line.startswith("作者：")), "")
+    body = rest.partition(EXCERPTS_MARKER)[0].strip()
+    prefix = f"{author}\n" if author else ""
+    return (prefix + body)[:preview_chars]
+
+
 def make_book_meta(profiles: pd.DataFrame, preview_chars: int = 300) -> dict[str, dict[str, str]]:
     return {
-        str(row.novel_id): {"title_guess": str(row.title_guess or ""), "profile_text_preview": str(row.profile_text)[:preview_chars]}
+        str(row.novel_id): {"title_guess": str(row.title_guess or ""), "profile_text_preview": synopsis_preview(str(row.profile_text), preview_chars)}
         for row in profiles.itertuples(index=False)
     }
 

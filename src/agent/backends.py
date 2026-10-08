@@ -159,7 +159,7 @@ def build_agent(
     judge = CachedTropeJudge(trope_transport, LazyRawText(inventory_path), model_name=trope_model or model)
 
     bundle = AgentBundle(loop=None, tools=ToolRegistry(), memory=memory, memory_path=memory_path)  # type: ignore[arg-type]
-    bundle.tools.register(build_search_books(searcher, budget))
+    bundle.tools.register(build_search_books(searcher, budget, profiles))
     bundle.tools.register(build_get_profile(profiles, budget))
     bundle.tools.register(build_check_term(densities))
     bundle.tools.register(build_check_trope(judge))

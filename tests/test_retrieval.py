@@ -249,3 +249,13 @@ def test_bench_strips_negatives_before_searching() -> None:
     evaluate(searcher, [BenchQuery("q", "仙侠 不系统", anchors=["x"])], depth=5, strip_negatives=False)
     assert searcher.queries[-1] == "仙侠 不系统"
 
+
+def test_synopsis_preview_skips_the_header() -> None:
+    from src.retrieval.multivector import synopsis_preview
+
+    text = frame().iloc[0]["profile_text"]
+    preview = synopsis_preview(text, 300)
+    assert preview.startswith("作者：某人\n普通少年韩立")
+    assert "长度：" not in preview and "节选" not in preview
+    assert synopsis_preview("没有标记的文本", 5) == "没有标记的"
+

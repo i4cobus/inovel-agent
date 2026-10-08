@@ -92,7 +92,18 @@ class TropeJudge(Protocol):
 # ---- tool builders --------------------------------------------------------------------------
 
 
-def build_search_books(searcher: BookSearcher, budget: ContextBudget) -> ToolSpec:
+def build_search_books(searcher: BookSearcher, budget: ContextBudget, profiles: ProfileLookup | None = None) -> ToolSpec:
+    """``profiles`` lets the preview be the synopsis even when the index's stored preview is the raw profile head."""
+
+    from src.retrieval.multivector import synopsis_preview
+
+    def preview_for(row: dict[str, Any]) -> str:
+        if profiles is not None:
+            full = profiles.get(str(row.get("novel_id", "")))
+            if full and full.get("profile"):
+                return synopsis_preview(full["profile"], budget.preview_chars)
+        return truncate(str(row.get("profile_text_preview", "")), budget.preview_chars)
+
     def handler(query: str, k: int = 10) -> list[dict[str, Any]]:
         query = str(query).strip()
         if not query:
@@ -106,7 +117,7 @@ def build_search_books(searcher: BookSearcher, budget: ContextBudget) -> ToolSpe
             {
                 "novel_id": str(row.get("novel_id", "")),
                 "title": str(row.get("title_guess", "")),
-                "preview": truncate(str(row.get("profile_text_preview", "")), budget.preview_chars),
+                "preview": preview_for(row),
                 "score": round(float(row.get("score", 0.0)), 4),
             }
             for row in rows

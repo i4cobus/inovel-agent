@@ -168,3 +168,19 @@ def test_redaction_strips_corpus_text_but_keeps_ids() -> None:
     assert redacted["final_answer"] == text_fingerprint("引用了原文")
     dumped = json.dumps(redacted, ensure_ascii=False)
     assert "正文正文" not in dumped and "原文引文" not in dumped and "简介简介" not in dumped
+
+
+def test_search_books_prefers_the_synopsis_preview_from_profiles() -> None:
+    from src.profile import make_profile_text
+
+    class Profiles:
+        def get(self, novel_id: str) -> dict[str, str] | None:
+            text = make_profile_text(title_guess="书", author_guess="某人", char_count=1, chapter_count=1, blurb="凡人修仙的故事。", chapter_excerpts=["节选正文"])
+            return {"title": "书", "profile": text} if novel_id == "n0" else None
+
+    registry = ToolRegistry()
+    registry.register(build_search_books(FakeSearcher(), ContextBudget(), Profiles()))
+    rows = registry.call("search_books", {"query": "仙侠", "k": 2})
+    assert rows[0]["preview"] == "作者：某人\n凡人修仙的故事。"
+    assert rows[1]["preview"].startswith("简介")  # unknown to the profile table: falls back to the stored preview
+
