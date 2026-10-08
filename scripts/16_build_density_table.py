@@ -75,10 +75,15 @@ def main(
     if out.exists() and not overwrite:
         raise typer.BadParameter(f"Output already exists: {out}. Use --overwrite to replace it.")
 
-    frame = pd.read_parquet(
-        inventory,
-        columns=["novel_id", "absolute_path", "detected_encoding", "read_status", "decode_replacement_chars"],
-    )
+    import pyarrow.parquet as pq
+
+    wanted = ["novel_id", "absolute_path", "detected_encoding", "read_status", "decode_replacement_chars"]
+    present = set(pq.read_schema(inventory).names)
+    frame = pd.read_parquet(inventory, columns=[column for column in wanted if column in present])
+    if "decode_replacement_chars" not in frame.columns:
+        # Inventories written before Stage 1 recorded lossy decodes (the PC's May 2026 table):
+        # treat every file as cleanly decoded, which only affects the allow_lossy flag.
+        frame["decode_replacement_chars"] = 0
     if limit is not None:
         frame = frame.head(limit)
     rows = frame.to_dict(orient="records")
