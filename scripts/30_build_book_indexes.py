@@ -45,6 +45,7 @@ def main(
     dtype: str = typer.Option("fp32", help="fp32 | bf16 | fp16; bf16 for the 4B model on a 16 GB card."),
     batch_size: int = typer.Option(DEFAULT_BATCH_SIZE),
     limit: int | None = typer.Option(None, help="First N profiles only (smoke run)."),
+    cards: Path | None = typer.Option(None, help="book_cards.parquet: adds a card section per book to a multi-vector index."),
     overwrite: bool = typer.Option(False),
 ) -> None:
     if dense not in ("single", "multi", "none"):
@@ -77,7 +78,14 @@ def main(
             save_id_map(make_id_map(frame), out_dir / "novel_id_map.json")
             vectors = int(embeddings.shape[0])
         else:
-            texts, records = build_section_table(frame)
+            card_texts = None
+            if cards is not None:
+                from src.retrieval.cards import load_cards
+
+                card_texts = {novel_id: card.text() for novel_id, card in load_cards(cards).items()}
+                summary["cards"] = {"path": cards.as_posix(), "books_with_card": sum(1 for n in frame["novel_id"].astype(str) if n in card_texts)}
+                console.print(f"Cards: {summary['cards']}")
+            texts, records = build_section_table(frame, card_texts)
             stats = section_stats(records)
             summary["sections"] = stats
             console.print(f"Sections: {stats}")

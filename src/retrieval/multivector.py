@@ -58,13 +58,21 @@ def split_profile_sections(profile_text: str) -> list[Section]:
     return sections
 
 
-def build_section_table(profiles: pd.DataFrame) -> tuple[list[str], list[SectionRecord]]:
+def build_section_table(profiles: pd.DataFrame, card_texts: dict[str, str] | None = None) -> tuple[list[str], list[SectionRecord]]:
+    """One row per section. With ``card_texts`` (novel_id -> card text) a book also gets a "card" section,
+    prefixed with its title so title queries still land on it."""
+
     texts: list[str] = []
     records: list[SectionRecord] = []
     for row in profiles.itertuples(index=False):
-        for ordinal, section in enumerate(split_profile_sections(str(row.profile_text))):
+        novel_id = str(row.novel_id)
+        sections = split_profile_sections(str(row.profile_text))
+        card = (card_texts or {}).get(novel_id)
+        if card:
+            sections.append(Section("card", f"标题：{row.title_guess}\n{card}"))
+        for ordinal, section in enumerate(sections):
             texts.append(section.text)
-            records.append(SectionRecord(novel_id=str(row.novel_id), kind=section.kind, ordinal=ordinal))
+            records.append(SectionRecord(novel_id=novel_id, kind=section.kind, ordinal=ordinal))
     return texts, records
 
 
