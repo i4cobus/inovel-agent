@@ -221,3 +221,31 @@ def test_load_searchers_autodetects_what_a_directory_holds(tmp_path: Path) -> No
         load_searchers(single_dir, None)
     with pytest.raises(FileNotFoundError):
         load_searchers(tmp_path / "empty", model)
+
+
+def test_retrieval_query_drops_negatives_but_keeps_plain_text() -> None:
+    from src.retrieval.query import retrieval_query
+
+    assert "系统" not in retrieval_query("凡人流 仙侠 慢热 理性主角 不系统")
+    assert retrieval_query("都市 不要后宫 不要种马 搞笑") == "都市 搞笑"
+    assert retrieval_query("  玄幻 ") == "玄幻"
+    assert retrieval_query("无脑爽文 不要") == "无脑爽文 不要"  # nothing positive parses: pass through
+
+
+def test_bench_strips_negatives_before_searching() -> None:
+    class Recording:
+        name = "rec"
+
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        def search(self, query: str, k: int) -> list[dict[str, Any]]:
+            self.queries.append(query)
+            return []
+
+    searcher = Recording()
+    result = evaluate(searcher, [BenchQuery("q", "仙侠 不系统", anchors=["x"])], depth=5)
+    assert searcher.queries == ["仙侠"] and result.metrics()["negatives_stripped"] is True
+    evaluate(searcher, [BenchQuery("q", "仙侠 不系统", anchors=["x"])], depth=5, strip_negatives=False)
+    assert searcher.queries[-1] == "仙侠 不系统"
+

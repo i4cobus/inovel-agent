@@ -19,6 +19,7 @@ from typing import Any, Iterable
 
 from src.config import PROJECT_ROOT
 from src.evaluation import title_matches_anchor
+from src.retrieval.query import retrieval_query
 
 DEFAULT_QUERIES_PATH = PROJECT_ROOT / "eval" / "eval_queries.jsonl"
 DEFAULT_RESULTS_DIR = PROJECT_ROOT / "eval" / "results"
@@ -64,6 +65,7 @@ class BenchResult:
     anchor_ranks: dict[str, int | None]
     recall_at_k: dict[str, float]
     recall_k: int
+    strip_negatives: bool = True
 
     def metrics(self) -> dict[str, Any]:
         ranks = list(self.anchor_ranks.values())
@@ -79,6 +81,7 @@ class BenchResult:
             "anchor_unfound": len(ranks) - len(found),
             f"recall@{self.recall_k}_macro": round(sum(recalls) / len(recalls), 4) if recalls else None,
             "strong_queries": len(recalls),
+            "negatives_stripped": self.strip_negatives,
         }
 
 
@@ -88,21 +91,34 @@ def _share(ranks: list[int | None], k: int) -> float | None:
     return round(sum(1 for rank in ranks if rank is not None and rank <= k) / len(ranks), 4)
 
 
-def evaluate(searcher: Any, queries: list[BenchQuery], depth: int = 1000, recall_k: int = 20) -> BenchResult:
-    """Run every query once at ``depth`` and read both metric families off the same ranking."""
+def evaluate(searcher: Any, queries: list[BenchQuery], depth: int = 1000, recall_k: int = 20, strip_negatives: bool = True) -> BenchResult:
+    """Run every query once at ``depth`` and read both metric families off the same ranking.
+
+    ``strip_negatives`` mirrors the search_books tool: the dense retriever sees
+    positive terms only. The first sweep (2026-10-08, r3/r4) ran with the raw
+    query and so measured 「不系统」 pulling system-novels in.
+    """
 
     anchor_ranks: dict[str, int | None] = {}
     recall: dict[str, float] = {}
     for query in queries:
         if not query.anchors and not query.strong:
             continue
-        rows = searcher.search(query.query, depth)
+        text = retrieval_query(query.query) if strip_negatives else query.query
+        rows = searcher.search(text, depth)
         for anchor in query.anchors:
             anchor_ranks[f"{query.query_id}|{anchor}"] = anchor_rank(rows, anchor)
         if query.strong:
             top = {str(row["novel_id"]) for row in rows[:recall_k]}
             recall[query.query_id] = len(top & query.strong) / len(query.strong)
-    return BenchResult(name=getattr(searcher, "name", "searcher"), depth=depth, anchor_ranks=anchor_ranks, recall_at_k=recall, recall_k=recall_k)
+    return BenchResult(
+        name=getattr(searcher, "name", "searcher"),
+        depth=depth,
+        anchor_ranks=anchor_ranks,
+        recall_at_k=recall,
+        recall_k=recall_k,
+        strip_negatives=strip_negatives,
+    )
 
 
 def format_table(results: list[BenchResult]) -> str:

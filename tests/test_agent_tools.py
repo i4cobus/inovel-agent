@@ -59,7 +59,11 @@ def test_schemas_are_openai_function_tools() -> None:
 
 def test_search_books_applies_preview_budget_and_k_bounds() -> None:
     registry = full_registry()
-    rows = registry.call("search_books", {"query": "仙侠", "k": 3})
+    searcher = FakeSearcher()
+    registry = ToolRegistry()
+    registry.register(build_search_books(searcher, ContextBudget()))
+    rows = registry.call("search_books", {"query": "仙侠 慢热 不系统", "k": 3})
+    assert searcher.queries == [("仙侠 慢热", 3)]  # the negative never reaches the retriever
     assert len(rows) == 3
     assert len(rows[0]["preview"]) == ContextBudget().preview_chars
     assert set(rows[0]) == {"novel_id", "title", "preview", "score"}

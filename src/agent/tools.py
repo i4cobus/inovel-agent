@@ -19,6 +19,7 @@ from src.agent.context import ContextBudget, truncate
 from src.agent.memory import MEMORY_KINDS, UserMemory
 from src.agent.trajectory import text_fingerprint
 from src.preferences import constraint_violation_from_densities, is_rule_checkable, merged_density_from_table
+from src.retrieval.query import retrieval_query
 
 
 class ToolError(Exception):
@@ -99,7 +100,8 @@ def build_search_books(searcher: BookSearcher, budget: ContextBudget) -> ToolSpe
         k = int(k)
         if k < 1 or k > budget.max_search_k:
             raise ToolError(f"k 必须在 1 到 {budget.max_search_k} 之间")
-        rows = searcher.search(query, k)
+        # Negatives never reach the embedder; the agent enforces them with check_term / check_trope.
+        rows = searcher.search(retrieval_query(query), k)
         return [
             {
                 "novel_id": str(row.get("novel_id", "")),
@@ -115,7 +117,7 @@ def build_search_books(searcher: BookSearcher, budget: ContextBudget) -> ToolSpe
 
     return ToolSpec(
         name="search_books",
-        description="按自然语言描述检索书库，返回候选书的 novel_id、书名、简介片段和相似度。换不同措辞可以多搜几次。",
+        description="按描述检索书库，返回候选书的 novel_id、书名、简介片段和相似度。只写想要的特征，不要写「不要……」：负向约束检索不认，要用 check_term / check_trope 核查。换不同措辞可以多搜几次。",
         parameters={
             "type": "object",
             "properties": {
