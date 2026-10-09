@@ -1,8 +1,12 @@
 """Write a standalone HTML page for reviewing book cards by hand, card beside its digest.
 
-    uv run python scripts/37_card_review_page.py --sample 30
+    uv run python scripts/37_card_review_page.py --cards 9b=data/processed/book_cards.parquet \
+        --cards flash=data/processed/book_cards_api_flash.parquet --cards plus=data/processed/book_cards_api_plus.parquet
     -> data/review/card_review.html   (open in a browser; verdicts stay in that browser's
        localStorage and can be exported to JSON / imported back from the page)
+
+Each --cards is label=path (a bare path takes its file stem as label). The page shows one
+book at a time with a model switch, and keeps a verdict per (book, model).
 
 Needs the digest parquet (data/processed/novel_digests.parquet), so it runs where the
 data is (the PC); the page itself is a single file that opens anywhere.
@@ -34,49 +38,61 @@ def sample_order(novel_id: str) -> str:
     return hashlib.md5(f"review:{novel_id}".encode()).hexdigest()
 
 
+CARD_FIELDS = ("genre", "subgenre", "elements", "style", "protagonist", "setting", "tone", "one_liner", "keywords", "dropped", "evidence", "model", "prompt_version")
+
+
+def parse_card_sets(specs: list[Path]) -> list[tuple[str, Path]]:
+    out: list[tuple[str, Path]] = []
+    for spec in specs:
+        text = str(spec)
+        label, _, path = text.partition("=")
+        if not path:
+            label, path = Path(text).stem.removeprefix("book_cards_") or Path(text).stem, text
+        out.append((label, Path(path)))
+    return out
+
+
 @app.command()
 def main(
-    cards: Path = typer.Option(DEFAULT_CARDS_PATH),
+    cards: list[Path] = typer.Option([DEFAULT_CARDS_PATH], help="label=path, repeatable; the first is the default model shown."),
     digests: Path = typer.Option(DEFAULT_DIGEST_PATH),
     ids: Path = typer.Option(DEFAULT_IDS, help="novel_ids to include, one per line"),
     sample: int = typer.Option(30, help="How many books get the 抽样 mark (stable hash order)."),
     out: Path = typer.Option(DEFAULT_OUT),
 ) -> None:
     wanted = [line.strip() for line in ids.read_text(encoding="utf-8").splitlines() if line.strip()]
-    card_map = load_cards(cards)
+    sets = parse_card_sets(cards)
+    card_maps = {label: load_cards(path) for label, path in sets}
+    labels = [label for label, _ in sets]
     frame = pd.read_parquet(digests, columns=["novel_id", "title_guess", "sections_json"])
     frame = frame[frame["novel_id"].astype(str).isin(set(wanted))]
     sections = load_sections(frame)
     titles = {str(r.novel_id): str(r.title_guess or "") for r in frame.itertuples(index=False)}
-    sampled = set(sorted((n for n in wanted if n in card_map), key=sample_order)[:sample])
+    present = [n for n in wanted if any(n in m for m in card_maps.values())]
+    sampled = set(sorted(present, key=sample_order)[:sample])
     rows = []
-    for novel_id in wanted:
-        card = card_map.get(novel_id)
-        if card is None:
-            continue
+    for novel_id in present:
+        per_model = {}
+        for label in labels:
+            card = card_maps[label].get(novel_id)
+            if card is None:
+                continue
+            d = card.to_dict()
+            per_model[label] = {k: d[k] for k in CARD_FIELDS}
         rows.append(
             {
                 "id": novel_id,
                 "title": titles.get(novel_id, ""),
                 "sampled": novel_id in sampled,
-                "genre": card.genre,
-                "subgenre": card.subgenre,
-                "elements": list(card.elements),
-                "style": dict(card.style),
-                "protagonist": card.protagonist,
-                "setting": card.setting,
-                "tone": card.tone,
-                "one_liner": card.one_liner,
-                "keywords": list(card.keywords),
-                "dropped": list(card.dropped),
-                "evidence": dict(card.evidence),
+                "cards": per_model,
                 "sections": [{"kind": KIND_NAMES.get(s.kind, s.kind), "text": s.text} for s in sections.get(novel_id, [])],
             }
         )
-    payload = json.dumps({"cards": rows, "elements": dict(ELEMENTS), "style_options": {k: list(v) for k, v in STYLE_OPTIONS.items()}}, ensure_ascii=False).replace("</", "<\\/")
+    payload = json.dumps({"models": labels, "cards": rows, "elements": dict(ELEMENTS), "style_options": {k: list(v) for k, v in STYLE_OPTIONS.items()}}, ensure_ascii=False).replace("</", "<\\/")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(TEMPLATE.replace("__DATA__", payload), encoding="utf-8")
-    console.print(f"{len(rows)} cards ({len(sampled)} sampled, {sum(1 for r in rows if r['sections'])} with digest) -> {out}  {out.stat().st_size / 1e6:.1f} MB")
+    counts = ", ".join(f"{label} {sum(1 for r in rows if label in r['cards'])}" for label in labels)
+    console.print(f"{len(rows)} books ({len(sampled)} sampled, {sum(1 for r in rows if r['sections'])} with digest); cards: {counts} -> {out}  {out.stat().st_size / 1e6:.1f} MB")
 
 
 TEMPLATE = r"""<!doctype html>
@@ -151,6 +167,7 @@ pre{white-space:pre-wrap;font-family:var(--body);font-size:13px;line-height:1.7;
     <div class="filters">
       <label><input type="checkbox" id="fSample" checked> 只看抽样</label>
       <label><input type="checkbox" id="fTodo"> 只看未审</label>
+      <select id="fModel" title="模型"></select>
       <select id="fGenre"><option value="">全部题材</option></select>
       <select id="fTrope"><option value="">任一元素</option></select>
       <input id="fQ" type="search" placeholder="搜书名、一句话、关键词">
@@ -167,39 +184,48 @@ pre{white-space:pre-wrap;font-family:var(--body);font-size:13px;line-height:1.7;
 <script id="data" type="application/json">__DATA__</script>
 <script>
 const DATA = JSON.parse(document.getElementById('data').textContent);
-const CARDS = DATA.cards, ELEMENTS = DATA.elements, STYLE = DATA.style_options;
+const BOOKS = DATA.cards, MODELS = DATA.models, ELEMENTS = DATA.elements, STYLE = DATA.style_options;
+let model = MODELS[0]; try { const m = localStorage.getItem('cardReview.model'); if (MODELS.includes(m)) model = m; } catch (e) {}
+const cardOf = b => b.cards[model];
+const CARDS = BOOKS;  // alias kept for the filters below
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const KEY = 'cardReview.verdicts.v2';
+const KEY = 'cardReview.verdicts.v3';
 let verdicts = {}; try { verdicts = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+// v2 verdicts were made on the 9B v2.1 cards: carry them over under the '9b' label if nothing newer exists.
+try { const old = JSON.parse(localStorage.getItem('cardReview.verdicts.v2') || '{}'); if (!Object.keys(verdicts).length) for (const [id, v] of Object.entries(old)) verdicts[id + '|9b'] = v; } catch (e) {}
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(verdicts)); } catch (e) {} renderStats(); };
-const V = id => (verdicts[id] ||= {fields:{}, elements:{}, style:{}, missing:'', note:'', done:false});
+const vk = (id, m) => id + '|' + (m || model);
+const V = id => (verdicts[vk(id)] ||= {fields:{}, elements:{}, style:{}, missing:'', note:'', done:false});
+const doneFor = id => verdicts[vk(id)]?.done;
 
 let selected = null; try { selected = localStorage.getItem('cardReview.selected'); } catch (e) {}
-const genres = [...new Set(CARDS.map(c => c.genre))].sort();
+const genres = [...new Set(BOOKS.flatMap(b => Object.values(b.cards).map(c => c.genre)))].sort();
+$('#fModel').innerHTML = MODELS.map(m => `<option ${m===model?'selected':''}>${esc(m)}</option>`).join('');
+$('#fModel').addEventListener('change', e => { model = e.target.value; try { localStorage.setItem('cardReview.model', model); } catch (x) {} renderList(); });
 $('#fGenre').innerHTML += genres.map(g => `<option>${esc(g)}</option>`).join('');
 $('#fTrope').innerHTML += Object.keys(ELEMENTS).map(t => `<option>${esc(t)}</option>`).join('');
 for (const id of ['fSample','fTodo','fGenre','fTrope','fQ']) $('#'+id).addEventListener('input', renderList);
 
 function renderStats() {
-  const done = CARDS.filter(c => verdicts[c.id]?.done); const sampled = CARDS.filter(c => c.sampled);
+  const done = BOOKS.filter(b => doneFor(b.id)); const sampled = BOOKS.filter(b => b.sampled);
   let eOk = 0, eBad = 0, sOk = 0, sBad = 0, fOk = 0, fBad = 0;
-  for (const c of done) { const v = verdicts[c.id];
+  for (const c of done) { const v = verdicts[vk(c.id)];
     for (const x of Object.values(v.elements)) { if (x === 'ok') eOk++; else if (x === 'bad') eBad++; }
     for (const x of Object.values(v.style)) { if (x === 'ok') sOk++; else if (x) sBad++; }
     for (const x of Object.values(v.fields)) { if (x === 'ok') fOk++; else if (x) fBad++; } }
-  $('#stats').innerHTML = `共 <b>${CARDS.length}</b> 张 · 抽样 <b>${sampled.length}</b> · 已审 <b>${done.length}</b>（抽样里 ${sampled.filter(c=>verdicts[c.id]?.done).length}）· 元素 对 <b>${eOk}</b> 错 <b>${eBad}</b> · 风格 对 <b>${sOk}</b> 偏 <b>${sBad}</b> · 描述字段 对 <b>${fOk}</b> 有误 <b>${fBad}</b>`;
+  $('#stats').innerHTML = `模型 <b>${esc(model)}</b> · 共 <b>${BOOKS.filter(b=>cardOf(b)).length}</b> 张 · 抽样 <b>${sampled.length}</b> · 已审 <b>${done.length}</b>（抽样里 ${sampled.filter(b=>doneFor(b.id)).length}）· 元素 对 <b>${eOk}</b> 错 <b>${eBad}</b> · 风格 对 <b>${sOk}</b> 偏 <b>${sBad}</b> · 描述字段 对 <b>${fOk}</b> 有误 <b>${fBad}</b>`;
 }
 function filtered() {
   const s = $('#fSample').checked, td = $('#fTodo').checked, g = $('#fGenre').value, t = $('#fTrope').value, q = $('#fQ').value.trim().toLowerCase();
-  return CARDS.filter(c => (!s || c.sampled) && (!td || !verdicts[c.id]?.done) && (!g || c.genre === g) && (!t || c.elements.includes(t)) &&
-    (!q || [c.title, c.subgenre, c.one_liner, c.protagonist, c.setting, ...c.keywords, ...c.elements].join(' ').toLowerCase().includes(q)));
+  return BOOKS.filter(b => { const c = cardOf(b); if (!c) return false; return (!s || b.sampled) && (!td || !doneFor(b.id)) && (!g || c.genre === g) && (!t || c.elements.includes(t)) &&
+    (!q || [b.title, c.subgenre, c.one_liner, c.protagonist, c.setting, ...c.keywords, ...c.elements].join(' ').toLowerCase().includes(q)); });
 }
 function renderList() {
   const rows = filtered();
-  $('#list').innerHTML = rows.length ? rows.map(c => `<div class="item${c.id===selected?' on':''}" data-id="${c.id}">
-    <div class="t"><span>${esc(c.title||'（无书名）')}</span><span class="stat">${esc(c.genre)}</span>${c.sampled?'<span class="tag s">抽样</span>':''}${verdicts[c.id]?.done?'<span class="tag d">已审</span>':''}</div>
-    <div class="o">${esc(c.one_liner)}</div></div>`).join('') : '<div class="empty">没有符合条件的书</div>';
+  $('#list').innerHTML = rows.length ? rows.map(b => { const c = cardOf(b); return `<div class="item${b.id===selected?' on':''}" data-id="${b.id}">
+    <div class="t"><span>${esc(b.title||'（无书名）')}</span><span class="stat">${esc(c.genre)}</span>${b.sampled?'<span class="tag s">抽样</span>':''}${doneFor(b.id)?'<span class="tag d">已审</span>':''}</div>
+    <div class="o">${esc(c.one_liner)}</div></div>`; }).join('') : '<div class="empty">没有符合条件的书</div>';
   if (!rows.some(c => c.id === selected) && rows.length) select(rows[0].id); else renderCard();
   renderStats();
 }
@@ -210,20 +236,23 @@ function step(d) { const rows = filtered(); const i = rows.findIndex(c => c.id =
 
 const FIELDS = [['subgenre','题材二级'],['one_liner','一句话'],['protagonist','主角'],['setting','背景'],['tone','气质'],['keywords','关键词']];
 function renderCard() {
-  const c = CARDS.find(x => x.id === selected); const el = $('#card'), dg = $('#digest');
-  if (!c) { el.innerHTML = '<div class="empty">左侧选一本</div>'; dg.innerHTML = ''; return; }
-  const v = V(c.id);
+  const b = BOOKS.find(x => x.id === selected); const c = b && cardOf(b); const el = $('#card'), dg = $('#digest');
+  if (!b || !c) { el.innerHTML = '<div class="empty">左侧选一本</div>'; dg.innerHTML = ''; return; }
+  const v = V(b.id);
+  const others = MODELS.filter(m => m !== model && b.cards[m]);
+  const cmp = others.length ? `<div><h4>其他模型的同一本</h4><dl class="kv">${others.map(m => { const o = b.cards[m]; return `<dt>${esc(m)}</dt><dd>${esc(o.genre)}${o.subgenre?' · '+esc(o.subgenre):''}；元素：${o.elements.map(esc).join('、')||'无'}；${Object.entries(o.style).filter(([,x])=>x).map(([d,x])=>esc(d)+' '+esc(x)).join('，')}<br><span class="hint">${esc(o.one_liner)}</span></dd>`; }).join('')}</dl></div>` : '';
   const chip = t => { const st = v.elements[t] || ''; const q = (c.evidence||{})[t]; return `<span class="chip y v ${st}" data-t="${esc(t)}" title="${esc(ELEMENTS[t]||'')}${q?'\n依据：'+esc(q):''}">${esc(t)}${q?`<span class="m">“${esc(q)}”</span>`:''}<span class="m">${st==='ok'?'✓':st==='bad'?'✗':'·'}</span></span>`; };
   const seg = (name, opts, cur, group) => `<span class="seg" data-f="${name}" data-g="${group}">${opts.map(([k,l]) => `<button type="button" data-v="${k}" class="${cur===k?'on':''}">${l}</button>`).join('')}</span>`;
   const styleRows = Object.entries(STYLE).map(([dim, opts]) => `<div class="row"><span>${esc(dim)}<br><span class="hint">卡片：<b>${esc(c.style[dim]||'（空）')}</b></span></span>${seg(dim, [['ok','对'],['off1','偏一档'],['off2','差很多']], v.style[dim]||'', 'style')}</div>`).join('');
   el.innerHTML = `
-    <div class="nav"><button type="button" id="prev">‹ 上一本</button><span class="sp"></span><span class="stat">${esc(c.sampled?'抽样':'')}</span><span class="sp"></span><button type="button" id="next">下一本 ›</button></div>
-    <h3>${esc(c.title||'（无书名）')}</h3>
+    <div class="nav"><button type="button" id="prev">‹ 上一本</button><span class="sp"></span><span class="seg" id="modelSeg">${MODELS.filter(m=>b.cards[m]).map(m=>`<button type="button" data-m="${esc(m)}" class="${m===model?'on':''}">${esc(m)}</button>`).join('')}</span><span class="sp"></span><button type="button" id="next">下一本 ›</button></div>
+    <h3>${esc(b.title||'（无书名）')} <span class="stat">${esc(model)}${b.sampled?' · 抽样':''}</span></h3>
     <div class="chips"><span class="chip g">${esc(c.genre)}${c.subgenre?' · '+esc(c.subgenre):''}</span>${Object.entries(c.style).filter(([,x])=>x).map(([d,x])=>`<span class="chip">${esc(d)}·${esc(x)}</span>`).join('')}</div>
     <p class="one">${esc(c.one_liner)}</p>
     ${(c.evidence||{}).subgenre ? `<div class="hint">二级依据：“${esc(c.evidence.subgenre)}”</div>` : ''}
     <dl class="kv"><dt>主角</dt><dd>${esc(c.protagonist)}</dd><dt>背景</dt><dd>${esc(c.setting)}</dd><dt>气质</dt><dd>${esc(c.tone)}</dd><dt>关键词</dt><dd><div class="chips">${c.keywords.map(k=>`<span class="chip">${esc(k)}</span>`).join('')||'<span class="hint">无</span>'}</div></dd>${c.dropped.length?`<dt>词表外</dt><dd class="hint">${c.dropped.map(esc).join('、')}（模型想说但词表没有，已丢弃）</dd>`:''}</dl>
     <div><h4>元素（${c.elements.length}）· 点一下 ✓ 对，再点 ✗ 错，再点清除</h4><div class="chips">${c.elements.map(chip).join('')||'<span class="hint">无</span>'}</div></div>
+    ${cmp}
     <div class="review">
       <h4>人工审阅 · 风格档位</h4>
       ${styleRows}
@@ -232,7 +261,7 @@ function renderCard() {
       <div class="row"><span>漏掉的元素</span><input type="text" id="missing" value="${esc(v.missing)}" placeholder="书里有但卡片没列的元素，逗号分隔"></div>
       <div class="row" style="align-items:start"><span>备注</span><textarea id="note" rows="3">${esc(v.note)}</textarea></div>
       <div class="row"><span></span><label><input type="checkbox" id="done" ${v.done?'checked':''}> 这本审完了</label></div>
-      <div class="hint">审阅结果存在这个浏览器里，右上角可导出 JSON。novel_id ${esc(c.id)}</div>
+      <div class="hint">审阅结果按（书，模型）分别保存在这个浏览器里，右上角可导出 JSON。novel_id ${esc(b.id)}</div>
     </div>`;
   el.querySelectorAll('.chip.v').forEach(ch => ch.addEventListener('click', () => { const t = ch.dataset.t; const cur = v.elements[t] || ''; v.elements[t] = cur === '' ? 'ok' : cur === 'ok' ? 'bad' : ''; if (!v.elements[t]) delete v.elements[t]; save(); renderCard(); }));
   el.querySelectorAll('.seg').forEach(sg => sg.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; const f = sg.dataset.f, bag = v[sg.dataset.g]; bag[f] = bag[f] === b.dataset.v ? '' : b.dataset.v; if (!bag[f]) delete bag[f]; save(); renderCard(); }));
@@ -240,7 +269,8 @@ function renderCard() {
   $('#note').addEventListener('input', e => { v.note = e.target.value; save(); });
   $('#done').addEventListener('change', e => { v.done = e.target.checked; save(); renderList(); });
   $('#prev').addEventListener('click', () => step(-1)); $('#next').addEventListener('click', () => step(1));
-  dg.innerHTML = c.sections.length ? `<h4>digest 原文（${c.sections.length} 段，书卡只读了这些）</h4>` + c.sections.map((s, i) => `<details ${i===0||s.kind==='章节名'?'open':''}><summary>${esc(s.kind)}<span>${s.text.length} 字</span></summary><pre>${esc(s.text)}</pre></details>`).join('') : '<div class="empty">这本没有 digest</div>';
+  $('#modelSeg').addEventListener('click', e => { const bt = e.target.closest('button'); if (!bt) return; model = bt.dataset.m; $('#fModel').value = model; try { localStorage.setItem('cardReview.model', model); } catch (x) {} renderList(); });
+  dg.innerHTML = b.sections.length ? `<h4>digest 原文（${b.sections.length} 段，书卡只读了这些）</h4>` + b.sections.map((s, i) => `<details ${i===0||s.kind==='章节名'?'open':''}><summary>${esc(s.kind)}<span>${s.text.length} 字</span></summary><pre>${esc(s.text)}</pre></details>`).join('') : '<div class="empty">这本没有 digest</div>';
   dg.scrollTop = 0;
 }
 $('#btnExport').addEventListener('click', () => {
