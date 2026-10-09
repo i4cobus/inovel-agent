@@ -25,6 +25,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 from src.chat_transport import ChatTransport
 from src.config import DATA_DIR
+from src.digest import DIGEST_VERSION
 from src.llm_json import extract_json_object
 from src.retrieval.card_schema import ELEMENT_ALIASES, ELEMENT_QUOTE_SIGNATURES, ELEMENTS, GENRES, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_ALIASES, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
 
@@ -108,9 +109,9 @@ class BookCard:
         return "\n".join(parts)
 
 
-# A digest runs to 12k characters (16k for the few books without chapter structure); the default
-# sends it whole, about 10k tokens with the vocabulary.
-DEFAULT_CARD_MAX_CHARS = 16000
+# A digest_v2 runs to about 40k characters (whole chapters); the default sends it whole, roughly 30k
+# tokens with the vocabulary. That is beyond a 32K local context: cards are built with a hosted model.
+DEFAULT_CARD_MAX_CHARS = 60000
 
 
 def build_card_prompt(profile_text: str, max_chars: int = DEFAULT_CARD_MAX_CHARS) -> str:
@@ -320,7 +321,9 @@ def parse_card(novel_id: str, text: str, model: str = "", source_text: str | Non
 
 
 def card_cache_key(novel_id: str, model: str) -> str:
-    return f"{CARD_PROMPT_VERSION}|{model}|{novel_id}"
+    # The digest version is part of the key: a card built from a shorter digest must not be reused
+    # as if it had read the longer one.
+    return f"{CARD_PROMPT_VERSION}|{DIGEST_VERSION}|{model}|{novel_id}"
 
 
 class CardBuilder:

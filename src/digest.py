@@ -2,8 +2,8 @@
 
 Replaces the profile (2026-10-09). A web novel states its genre, setting,
 protagonist and 金手指 in its first chapters and shows whether it collapsed in
-its last ones, so the digest spends most of its budget there. Three short
-middle windows catch a change of register. The chapter-title list is the
+its last ones, so the digest reads those chapters whole. Six middle chapters
+(digest_v2) catch what only develops later: a harem, a war, a change of register. The chapter-title list is the
 author's own free summary of the whole book: 「第312章 青儿的心意」 says more
 about a romance line than any sampled window would.
 
@@ -31,15 +31,26 @@ from src.split_chapters import split_chapters
 
 DEFAULT_DIGEST_PATH = PROCESSED_DATA_DIR / "novel_digests.parquet"
 
+# digest_v2 (2026-10-10): whole chapters instead of 1,500-character heads. The corpus's median chapter
+# is 3,143 characters (p90 5,087), so v1 cut every chapter roughly in half and read 1,800 characters
+# of the middle of a million-character book. v2 reads 4 opening, 6 middle and 2 ending chapters whole
+# (about 40k characters a book); the per-chapter cap only guards against broken chapter splits.
+# Anything keyed on the digest's content (book-card cache) carries DIGEST_VERSION.
+DIGEST_VERSION = "digest_v2"
 OPENING_CHAPTERS = 4
-OPENING_CHARS = 1500
+OPENING_CHARS = 8000
 ENDING_CHAPTERS = 2
-ENDING_CHARS = 1500
-MIDDLE_WINDOWS = 3
-MIDDLE_CHARS = 600
+ENDING_CHARS = 8000
+MIDDLE_WINDOWS = 6
+MIDDLE_CHARS = 8000
+MIDDLE_FRACTIONS = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90)
 TITLE_SAMPLES = 100
 BLURB_CHARS = 500
 MIN_CHAPTERS = 3
+# Fallback for books without chapter structure: character windows of these sizes.
+FALLBACK_OPENING_CHARS = 12000
+FALLBACK_MIDDLE_CHARS = 3000
+FALLBACK_ENDING_CHARS = 6000
 
 ENDING_MARKER_RE = re.compile(r"(全书完|全文完|全本完|大结局|正文完|本书完|（完）|\(完\)|完结)")
 NON_NARRATIVE_TITLE_RE = re.compile(r"(番外|后记|感言|作者的话|完本|上架|请假|通知|公告|推荐)")
@@ -76,6 +87,7 @@ class Digest:
             "profile_text": self.text(),
             "sections_json": json.dumps([{"kind": s.kind, "text": s.text} for s in self.sections], ensure_ascii=False),
             "used_chapter_indices": json.dumps(self.used_chapter_indices),
+            "digest_version": DIGEST_VERSION,
         }
 
 
@@ -96,7 +108,7 @@ def digest_chapter_indices(chapters: Sequence[Any]) -> dict[str, list[int]]:
     inner = [i for i in usable if i not in opening and i not in ending]
     middle: list[int] = []
     if inner:
-        for fraction in (0.25, 0.5, 0.75)[:MIDDLE_WINDOWS]:
+        for fraction in MIDDLE_FRACTIONS[:MIDDLE_WINDOWS]:
             candidate = inner[min(int(fraction * len(inner)), len(inner) - 1)]
             if candidate not in middle:
                 middle.append(candidate)
@@ -145,15 +157,15 @@ def make_digest(novel_id: str, title: str, author: str | None, cleaned_text: str
     else:
         # No usable chapter structure: character windows in the same proportions.
         n = len(cleaned_text)
-        opening = trim_to_sentence(cleaned_text[: OPENING_CHARS * OPENING_CHAPTERS], OPENING_CHARS * OPENING_CHAPTERS)
+        opening = trim_to_sentence(cleaned_text[:FALLBACK_OPENING_CHARS], FALLBACK_OPENING_CHARS)
         if opening:
             sections.append(Section("opening", f"开头：\n{opening}"))
-        for fraction in (0.25, 0.5, 0.75):
+        for fraction in MIDDLE_FRACTIONS[:MIDDLE_WINDOWS]:
             start = int(n * fraction)
-            body = trim_to_sentence(cleaned_text[start : start + MIDDLE_CHARS], MIDDLE_CHARS)
+            body = trim_to_sentence(cleaned_text[start : start + FALLBACK_MIDDLE_CHARS], FALLBACK_MIDDLE_CHARS)
             if body:
                 sections.append(Section("middle", f"中段 {int(fraction * 100)}%：\n{body}"))
-        tail = trim_to_sentence(cleaned_text[-ENDING_CHARS * ENDING_CHAPTERS :], ENDING_CHARS * ENDING_CHAPTERS)
+        tail = trim_to_sentence(cleaned_text[-FALLBACK_ENDING_CHARS:], FALLBACK_ENDING_CHARS)
         if tail:
             sections.append(Section("ending", f"结尾：\n{tail}"))
     return Digest(novel_id, title, author, len(cleaned_text), len(chapters), status, sections, used)
