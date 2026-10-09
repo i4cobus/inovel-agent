@@ -270,7 +270,10 @@ def card_cache_key(novel_id: str, model: str) -> str:
 class CardBuilder:
     """Extract cards through a chat transport with a JSONL cache, resumable and thread-safe."""
 
-    def __init__(self, transport: ChatTransport, model_name: str, cache_path: Path = DEFAULT_CARD_CACHE_PATH, max_tokens: int = 700, max_chars: int = DEFAULT_CARD_MAX_CHARS) -> None:
+    def __init__(self, transport: ChatTransport, model_name: str, cache_path: Path = DEFAULT_CARD_CACHE_PATH, max_tokens: int = 1200, max_chars: int = DEFAULT_CARD_MAX_CHARS) -> None:
+        # Failures are not cached (a parse failure is this call's failure, not a fact about the
+        # book), so they are kept here for the caller to write out and look at.
+        self.failures: list[dict[str, Any]] = []
         self.transport = transport
         self.model_name = model_name
         self.cache_path = cache_path
@@ -306,10 +309,15 @@ class CardBuilder:
         try:
             card = parse_card(novel_id, response, model=self.model_name, source_text=profile_text[: self.max_chars])
         except (ValueError, json.JSONDecodeError, TypeError) as exc:
-            # Not cached: a parse failure is this call's failure, not a fact about the book.
-            return BookCard(novel_id, model=self.model_name, error=f"parse: {type(exc).__name__}")
+            error = f"parse: {type(exc).__name__}: {exc}"[:200]
+            self._record_failure(novel_id, error, response)
+            return BookCard(novel_id, model=self.model_name, error=error)
         self._append(key, card.to_dict())
         return card
+
+    def _record_failure(self, novel_id: str, error: str, response: str = "") -> None:
+        with self._lock:
+            self.failures.append({"novel_id": novel_id, "error": error, "response_chars": len(response), "response_tail": response[-300:]})
 
     def build_many(self, items: Iterable[tuple[str, str]], workers: int = 2, on_result: Callable[[BookCard], None] | None = None) -> list[BookCard]:
         items = list(items)
@@ -320,7 +328,9 @@ class CardBuilder:
             try:
                 results[index] = self.build_one(novel_id, text)
             except Exception as exc:  # noqa: BLE001 - one dead request must not kill the batch
-                results[index] = BookCard(novel_id, model=self.model_name, error=f"{type(exc).__name__}: {exc}"[:200])
+                error = f"{type(exc).__name__}: {exc}"[:200]
+                self._record_failure(novel_id, error)
+                results[index] = BookCard(novel_id, model=self.model_name, error=error)
             if on_result is not None:
                 on_result(results[index])  # type: ignore[arg-type]
 

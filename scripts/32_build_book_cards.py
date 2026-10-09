@@ -42,6 +42,7 @@ def main(
     seed: int = typer.Option(7, help="Seed for --sample."),
     workers: int = typer.Option(2, help="Concurrent requests to the model server."),
     max_chars: int = typer.Option(DEFAULT_CARD_MAX_CHARS, help="Digest characters sent per book (default: the whole digest)."),
+    max_tokens: int = typer.Option(1200, help="Output budget per card; a card cut off here fails to parse."),
     checkpoint: int = typer.Option(200, help="Rewrite the parquet every N cards."),
     report: bool = typer.Option(False, help="Only report vocabulary usage of the existing parquet."),
 ) -> None:
@@ -63,7 +64,7 @@ def main(
         frame = frame.head(limit)
     items = [(str(r.novel_id), str(r.profile_text)) for r in frame.itertuples(index=False)]
     transport = HTTPChatTransport(model=model, base_url=base_url, reasoning_effort=reasoning_effort, timeout=300.0)
-    builder = CardBuilder(transport, model, cache_path=cache, max_chars=max_chars)
+    builder = CardBuilder(transport, model, cache_path=cache, max_chars=max_chars, max_tokens=max_tokens)
     from src.retrieval.cards import card_cache_key
 
     already = sum(1 for novel_id, _ in items if card_cache_key(novel_id, model) in builder.cache)
@@ -88,6 +89,16 @@ def main(
     cards = builder.build_many(items, workers=workers, on_result=on_result)
     _write(cards, out)
     console.print(f"wrote {len(cards)} cards ({errors} with errors) -> {out} in {time.perf_counter() - started:.0f}s")
+    if builder.failures:
+        errors_path = out.with_name(out.stem + "_errors.jsonl")
+        with errors_path.open("w", encoding="utf-8") as handle:
+            for failure in builder.failures:
+                handle.write(json.dumps(failure, ensure_ascii=False) + "\n")
+        kinds: dict[str, int] = {}
+        for failure in builder.failures:
+            kind = failure["error"].split(":")[0]
+            kinds[kind] = kinds.get(kind, 0) + 1
+        console.print(f"failures by kind: {kinds} -> {errors_path}")
 
 
 def _write(cards: list, out: Path) -> None:

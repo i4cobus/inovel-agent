@@ -83,6 +83,7 @@ def test_builder_caches_resumes_and_keeps_parse_failures_out_of_the_cache(tmp_pa
     cards = builder.build_many([("a", "档案A"), ("b", "档案B")], workers=1)
     assert cards[0].genre == "仙侠" and cards[0].error == ""
     assert cards[1].error.startswith("parse") and cards[1].genre == "其他" and transport.calls == 2
+    assert [f["novel_id"] for f in builder.failures] == ["b"] and builder.failures[0]["response_tail"] == "不是 JSON"
 
     again = CardBuilder(FakeTransport([RESPONSE]), "m", cache_path=tmp_path / "c.jsonl")
     cards = again.build_many([("a", "档案A"), ("b", "档案B")], workers=2)
