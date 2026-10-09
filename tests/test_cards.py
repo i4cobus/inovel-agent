@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.retrieval.card_schema import ELEMENTS, GENRES, STYLE_OPTIONS, SUBGENRES, SUBGENRE_TO_GENRE, genre_of, vocabulary_text
-from src.retrieval.cards import BookCard, CardBuilder, build_card_prompt, cards_to_frame, load_cards, normalise_subgenre, parse_card, quote_supported, vocabulary_report
+from src.retrieval.cards import card_cache_key, BookCard, CardBuilder, build_card_prompt, cards_to_frame, load_cards, normalise_subgenre, parse_card, quote_supported, vocabulary_report
 from src.retrieval.multivector import build_section_table
 
 RESPONSE = json.dumps(
@@ -51,7 +51,7 @@ def test_parse_card_derives_genre_filters_vocabulary_and_records_drops() -> None
     assert card.evidence == {"凡人流": "资质平平的少年", "修仙": "踏上修仙之路", "炼丹炼器": "炼制丹药", "subgenre": "踏上修仙之路"}
     assert card.style == {"爽度": "低", "基调": "沉重压抑", "感情线比重": "辅线", "主角起点": "普通", "节奏": ""}
     assert card.keywords == ["宗门", "炼气", "a", "b", "c"]  # 凡人流 / 修仙 repeat elements
-    assert card.dropped == ["element:不存在的标签", "element_unsupported:系统", "style:节奏=飞快"]
+    assert card.dropped == ["element:不存在的标签", "element_unsupported:系统=叮，系统绑定成功", "style:节奏=飞快"]
     text = card.text()
     assert text.startswith("题材：仙侠·幻想修仙") and "元素：凡人流、修仙、炼丹炼器" in text and "爽度 低" in text and "一句话：普通少年一步步修仙。" in text
 
@@ -60,6 +60,28 @@ def test_parse_card_derives_genre_filters_vocabulary_and_records_drops() -> None
     assert odd.dropped == ["subgenre:奇怪"]
     bare = parse_card("n3", '{"subgenre": "历史", "elements": ["空间", "星际文明", "刑侦"]}')
     assert bare.genre == "历史" and bare.subgenre == "" and bare.elements == ["随身空间", "机甲星际", "刑侦推理"] and bare.dropped == ["subgenre_missing:历史"]
+
+
+def test_parse_card_flattens_elements_nested_by_group_and_routes_style_home() -> None:
+    # What qwen3.5:9b did on 377 of 437 cards in the first v2.2 run: nested by group name, style scales inside.
+    nested = json.dumps(
+        {
+            "subgenre": "幻想修仙",
+            "elements": {
+                "主角来路": {},
+                "流派": {"凡人流": "资质平平的少年"},
+                "世界设定": {"修真": "踏上修仙之路", "末世": "x"},
+                "感情与人物结构": ["群像"],
+                "爽度": "低",
+            },
+            "style": {"基调": "沉重压抑"},
+        },
+        ensure_ascii=False,
+    )
+    card = parse_card("n4", nested, source_text=SOURCE)
+    assert card.elements == ["凡人流", "修仙"]
+    assert card.dropped == ["element_unsupported:末世=x", "element_unsupported:群像="]
+    assert card.style["爽度"] == "低" and card.style["基调"] == "沉重压抑"
 
 
 def test_prompt_carries_the_vocabulary_and_caps_the_digest() -> None:
@@ -88,6 +110,13 @@ def test_builder_caches_resumes_and_keeps_parse_failures_out_of_the_cache(tmp_pa
     again = CardBuilder(FakeTransport([RESPONSE]), "m", cache_path=tmp_path / "c.jsonl")
     cards = again.build_many([("a", "档案A"), ("b", "档案B")], workers=2)
     assert {c.novel_id: c.error for c in cards} == {"a": "", "b": ""}  # a from cache, b rebuilt
+
+    # The raw response is cached, so a parser change replays without the model.
+    assert again.raw[card_cache_key("b", "m")] == RESPONSE
+    assert again.reparse([("a", "档案A"), ("b", SOURCE), ("zzz", "没建过")]) == 2
+    third = CardBuilder(FakeTransport([]), "m", cache_path=tmp_path / "c.jsonl")
+    assert third.build_one("b", SOURCE).elements == ["凡人流", "修仙", "炼丹炼器"]  # quotes now checked against SOURCE
+    assert third.build_one("a", "档案A").elements == []  # nothing in 档案A backs a quote
 
 
 def test_frame_round_trip_card_section_and_report(tmp_path: Path) -> None:

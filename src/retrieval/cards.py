@@ -28,7 +28,7 @@ from src.config import DATA_DIR
 from src.llm_json import extract_json_object
 from src.retrieval.card_schema import ELEMENT_ALIASES, ELEMENTS, GENRES, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
 
-CARD_PROMPT_VERSION = "card_v2.2"
+CARD_PROMPT_VERSION = "card_v2.3"
 DEFAULT_CARDS_PATH = DATA_DIR / "processed" / "book_cards.parquet"
 DEFAULT_CARD_CACHE_PATH = DATA_DIR / "cache" / "book_cards.jsonl"
 LIST_FIELDS = ("elements", "keywords", "dropped")
@@ -122,7 +122,8 @@ def build_card_prompt(profile_text: str, max_chars: int = DEFAULT_CARD_MAX_CHARS
         "填写规则：\n"
         "- subgenre：从题材二级里选最贴切的一个，原样抄写二级名（不要写括号里的一级）；都不合适就填空字符串。\n"
         "- elements：只列出档案里能看到依据的元素。每个元素附一段不超过 20 字的档案原文摘录作为依据，"
-        "必须逐字抄自档案，不能改写；写不出原文摘录的元素不要列。没有就给空对象。不要自己造标签。\n"
+        "必须逐字抄自档案，不能改写；写不出原文摘录的元素不要列。没有就给空对象。不要自己造标签。"
+        "elements 是一层的对象（元素名 → 摘录），不要按分组名嵌套，分组名本身不是元素；风格维度不要写进 elements。\n"
         "- subgenre_evidence：支持所选二级的一句原文摘录，不超过 20 字。\n"
         "- style：五项每项选一档，原样抄写档位。\n"
         "- protagonist / setting：各不超过 30 字。tone：用一个短语描述这本书的气质，不超过 20 字。\n"
@@ -175,6 +176,38 @@ def quote_supported(quote: str, source_text: str) -> bool:
     return False
 
 
+def _element_pairs(raw: Any) -> list[tuple[str, str]]:
+    """(label, quote) pairs from whatever shape the model gave `elements`.
+
+    The prompt asks for a flat {label: quote} object, but the vocabulary is shown in groups and
+    the 9B model nested its answer by group name on 377 of 437 cards in the first v2.2 run, so a
+    mapping value is walked recursively; a plain list is labels without quotes.
+    """
+
+    if raw is None:
+        return []
+    if isinstance(raw, Mapping):
+        pairs: list[tuple[str, str]] = []
+        for key, value in raw.items():
+            label = str(key).strip()
+            if isinstance(value, Mapping):
+                pairs.extend(_element_pairs(value))
+            elif isinstance(value, list):
+                pairs.extend(_element_pairs(value))
+            else:
+                pairs.append((label, str(value or "").strip()))
+        return pairs
+    if isinstance(raw, list):
+        pairs = []
+        for item in raw:
+            if isinstance(item, (Mapping, list)):
+                pairs.extend(_element_pairs(item))
+            else:
+                pairs.append((str(item).strip(), ""))
+        return pairs
+    return [(str(raw).strip(), "")]
+
+
 def normalise_subgenre(raw: str) -> tuple[str, str]:
     """(subgenre, genre) from what the model wrote: a sub-genre, "一级：二级", "二级（一级）", or just a genre.
 
@@ -210,19 +243,19 @@ def parse_card(novel_id: str, text: str, model: str = "", source_text: str | Non
 
     elements: list[str] = []
     evidence: dict[str, str] = {}
-    raw_elements = data.get("elements")
-    if isinstance(raw_elements, Mapping):
-        pairs = [(str(k).strip(), str(v or "").strip()) for k, v in raw_elements.items()]
-    else:
-        pairs = [(label, "") for label in _strs(raw_elements, 100)]
-    for label, quote in pairs:
+    style_in_elements: dict[str, str] = {}
+    for label, quote in _element_pairs(data.get("elements")):
+        if label in STYLE_OPTIONS:
+            # The 9B model sometimes files the style scales under elements; route them home.
+            style_in_elements[label] = quote
+            continue
         canonical = ELEMENT_ALIASES.get(label, label)
         if canonical not in ELEMENTS:
             dropped.append(f"element:{label}")
             continue
         if source_text is not None:
             if not quote_supported(quote, source_text):
-                dropped.append(f"element_unsupported:{canonical}")
+                dropped.append(f"element_unsupported:{canonical}={quote[:40]}")
                 continue
         if canonical not in elements:
             elements.append(canonical)
@@ -237,7 +270,7 @@ def parse_card(novel_id: str, text: str, model: str = "", source_text: str | Non
     style: dict[str, str] = {}
     raw_style = data.get("style") if isinstance(data.get("style"), Mapping) else {}
     for dim, options in STYLE_OPTIONS.items():
-        value = str(raw_style.get(dim, "") or "").strip()
+        value = str(raw_style.get(dim, "") or style_in_elements.get(dim, "") or "").strip()
         if value and value not in options:
             dropped.append(f"style:{dim}={value}")
             value = ""
@@ -283,6 +316,9 @@ class CardBuilder:
         self.cache: dict[str, dict[str, Any]] = self._load()
 
     def _load(self) -> dict[str, dict[str, Any]]:
+        # The raw model response is kept beside the parsed card (since card_v2.3) so that a
+        # parser change can be replayed over the cache instead of over the GPU: see reparse().
+        self.raw: dict[str, str] = {}
         if not self.cache_path.exists():
             return {}
         out: dict[str, dict[str, Any]] = {}
@@ -291,14 +327,44 @@ class CardBuilder:
                 if line.strip():
                     record = json.loads(line)
                     out[record["key"]] = record["card"]
+                    if record.get("raw"):
+                        self.raw[record["key"]] = record["raw"]
         return out
 
-    def _append(self, key: str, card: dict[str, Any]) -> None:
+    def _append(self, key: str, card: dict[str, Any], raw: str = "") -> None:
         with self._lock:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             with self.cache_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps({"key": key, "card": card}, ensure_ascii=False) + "\n")
+                handle.write(json.dumps({"key": key, "card": card, "raw": raw}, ensure_ascii=False) + "\n")
             self.cache[key] = card
+            if raw:
+                self.raw[key] = raw
+
+    def reparse(self, items: Iterable[tuple[str, str]]) -> int:
+        """Re-run parse_card over the cached raw responses of these books with the current parser.
+
+        Rewrites the cache file. Returns how many cards were reparsed; books without a cached raw
+        response (older cache lines, or never built) are left alone.
+        """
+
+        count = 0
+        with self._lock:
+            for novel_id, profile_text in items:
+                key = card_cache_key(novel_id, self.model_name)
+                raw = self.raw.get(key)
+                if raw is None:
+                    continue
+                try:
+                    card = parse_card(novel_id, raw, model=self.model_name, source_text=profile_text[: self.max_chars])
+                except (ValueError, json.JSONDecodeError, TypeError):
+                    continue
+                self.cache[key] = card.to_dict()
+                count += 1
+            if count:
+                with self.cache_path.open("w", encoding="utf-8") as handle:
+                    for key, card_dict in self.cache.items():
+                        handle.write(json.dumps({"key": key, "card": card_dict, "raw": self.raw.get(key, "")}, ensure_ascii=False) + "\n")
+        return count
 
     def build_one(self, novel_id: str, profile_text: str) -> BookCard:
         key = card_cache_key(novel_id, self.model_name)
@@ -312,7 +378,7 @@ class CardBuilder:
             error = f"parse: {type(exc).__name__}: {exc}"[:200]
             self._record_failure(novel_id, error, response)
             return BookCard(novel_id, model=self.model_name, error=error)
-        self._append(key, card.to_dict())
+        self._append(key, card.to_dict(), raw=response)
         return card
 
     def _record_failure(self, novel_id: str, error: str, response: str = "") -> None:
@@ -396,7 +462,7 @@ def vocabulary_report(cards: Mapping[str, BookCard]) -> dict[str, Any]:
         "elements": dict(elements.most_common()),
         "style": {dim: dict(c.most_common()) for dim, c in style.items()},
         "dropped": dict(dropped.most_common(50)),
-        "unsupported_elements": dict(Counter(d.split(":", 1)[1] for d in dropped.elements() if d.startswith("element_unsupported:")).most_common()),
+        "unsupported_elements": dict(Counter(d.split(":", 1)[1].split("=", 1)[0] for d in dropped.elements() if d.startswith("element_unsupported:")).most_common()),
         "keywords_top": dict(keywords.most_common(60)),
         "keywords_distinct": len(keywords),
         "elements_per_card": round(sum(len(c.elements) for c in cards.values()) / max(len(cards), 1), 2),

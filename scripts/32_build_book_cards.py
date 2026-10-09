@@ -45,6 +45,7 @@ def main(
     max_tokens: int = typer.Option(1200, help="Output budget per card; a card cut off here fails to parse."),
     checkpoint: int = typer.Option(200, help="Rewrite the parquet every N cards."),
     report: bool = typer.Option(False, help="Only report vocabulary usage of the existing parquet."),
+    reparse: bool = typer.Option(False, help="Re-parse the cached raw responses of the selected books with the current parser (no model calls) and rewrite the parquet."),
 ) -> None:
     if report:
         _report(out)
@@ -69,6 +70,12 @@ def main(
 
     already = sum(1 for novel_id, _ in items if card_cache_key(novel_id, model) in builder.cache)
     console.print(f"books: {len(items)}  cached: {already}  model: {model}  workers: {workers}")
+    if reparse:
+        count = builder.reparse(items)
+        cards = [builder.build_one(novel_id, text) for novel_id, text in items if card_cache_key(novel_id, model) in builder.cache]
+        _write(cards, out)
+        console.print(f"reparsed {count} cached responses; wrote {len(cards)} cards -> {out}")
+        return
 
     done: list = []
     started = time.perf_counter()
@@ -109,7 +116,7 @@ def _write(cards: list, out: Path) -> None:
 def _report(cards_path: Path) -> None:
     cards = load_cards(cards_path)
     summary = vocabulary_report(cards)
-    out = cards_path.with_name("book_cards_vocabulary.json")
+    out = cards_path.with_name(cards_path.stem + "_vocabulary.json")
     out.write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     console.print(f"cards {summary['cards']}  elements/card {summary['elements_per_card']}  distinct keywords {summary['keywords_distinct']}")
     console.print("genres:", summary["genres"])
