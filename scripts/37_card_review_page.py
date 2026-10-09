@@ -69,6 +69,7 @@ def main(
                 "one_liner": card.one_liner,
                 "keywords": list(card.keywords),
                 "dropped": list(card.dropped),
+                "evidence": dict(card.evidence),
                 "sections": [{"kind": KIND_NAMES.get(s.kind, s.kind), "text": s.text} for s in sections.get(novel_id, [])],
             }
         )
@@ -212,7 +213,7 @@ function renderCard() {
   const c = CARDS.find(x => x.id === selected); const el = $('#card'), dg = $('#digest');
   if (!c) { el.innerHTML = '<div class="empty">左侧选一本</div>'; dg.innerHTML = ''; return; }
   const v = V(c.id);
-  const chip = t => { const st = v.elements[t] || ''; return `<span class="chip y v ${st}" data-t="${esc(t)}" title="${esc(ELEMENTS[t]||'')}">${esc(t)}<span class="m">${st==='ok'?'✓':st==='bad'?'✗':'·'}</span></span>`; };
+  const chip = t => { const st = v.elements[t] || ''; const q = (c.evidence||{})[t]; return `<span class="chip y v ${st}" data-t="${esc(t)}" title="${esc(ELEMENTS[t]||'')}${q?'\n依据：'+esc(q):''}">${esc(t)}${q?`<span class="m">“${esc(q)}”</span>`:''}<span class="m">${st==='ok'?'✓':st==='bad'?'✗':'·'}</span></span>`; };
   const seg = (name, opts, cur, group) => `<span class="seg" data-f="${name}" data-g="${group}">${opts.map(([k,l]) => `<button type="button" data-v="${k}" class="${cur===k?'on':''}">${l}</button>`).join('')}</span>`;
   const styleRows = Object.entries(STYLE).map(([dim, opts]) => `<div class="row"><span>${esc(dim)}<br><span class="hint">卡片：<b>${esc(c.style[dim]||'（空）')}</b></span></span>${seg(dim, [['ok','对'],['off1','偏一档'],['off2','差很多']], v.style[dim]||'', 'style')}</div>`).join('');
   el.innerHTML = `
@@ -220,6 +221,7 @@ function renderCard() {
     <h3>${esc(c.title||'（无书名）')}</h3>
     <div class="chips"><span class="chip g">${esc(c.genre)}${c.subgenre?' · '+esc(c.subgenre):''}</span>${Object.entries(c.style).filter(([,x])=>x).map(([d,x])=>`<span class="chip">${esc(d)}·${esc(x)}</span>`).join('')}</div>
     <p class="one">${esc(c.one_liner)}</p>
+    ${(c.evidence||{}).subgenre ? `<div class="hint">二级依据：“${esc(c.evidence.subgenre)}”</div>` : ''}
     <dl class="kv"><dt>主角</dt><dd>${esc(c.protagonist)}</dd><dt>背景</dt><dd>${esc(c.setting)}</dd><dt>气质</dt><dd>${esc(c.tone)}</dd><dt>关键词</dt><dd><div class="chips">${c.keywords.map(k=>`<span class="chip">${esc(k)}</span>`).join('')||'<span class="hint">无</span>'}</div></dd>${c.dropped.length?`<dt>词表外</dt><dd class="hint">${c.dropped.map(esc).join('、')}（模型想说但词表没有，已丢弃）</dd>`:''}</dl>
     <div><h4>元素（${c.elements.length}）· 点一下 ✓ 对，再点 ✗ 错，再点清除</h4><div class="chips">${c.elements.map(chip).join('')||'<span class="hint">无</span>'}</div></div>
     <div class="review">

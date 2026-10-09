@@ -4,13 +4,14 @@ from pathlib import Path
 import pandas as pd
 
 from src.retrieval.card_schema import ELEMENTS, GENRES, STYLE_OPTIONS, SUBGENRES, SUBGENRE_TO_GENRE, genre_of, vocabulary_text
-from src.retrieval.cards import BookCard, CardBuilder, build_card_prompt, cards_to_frame, load_cards, normalise_subgenre, parse_card, vocabulary_report
+from src.retrieval.cards import BookCard, CardBuilder, build_card_prompt, cards_to_frame, load_cards, normalise_subgenre, parse_card, quote_supported, vocabulary_report
 from src.retrieval.multivector import build_section_table
 
 RESPONSE = json.dumps(
     {
         "subgenre": "幻想修仙",
-        "elements": ["凡人流", "修真", "炼丹炼器", "凡人流", "不存在的标签"],
+        "subgenre_evidence": "踏上修仙之路",
+        "elements": {"凡人流": "资质平平的少年", "修真": "踏上修仙之路", "炼丹炼器": "炼制丹药", "不存在的标签": "x", "系统": "叮，系统绑定成功"},
         "style": {"爽度": "低", "基调": "沉重压抑", "感情线比重": "辅线", "主角起点": "普通", "节奏": "飞快"},
         "protagonist": "资质普通的少年",
         "setting": "修仙界",
@@ -34,13 +35,23 @@ def test_schema_is_consistent() -> None:
     assert normalise_subgenre("瞎编") == ("", "其他") and normalise_subgenre("") == ("", "其他")
 
 
+SOURCE = "一个资质平平的少年，踏上修仙之路。他在山洞里炼制丹药，日复一日。"
+
+
+def test_quote_supported_ignores_punctuation_but_not_paraphrase() -> None:
+    assert quote_supported("资质平平的少年", SOURCE) and quote_supported("踏上修仙之路。", SOURCE)
+    assert quote_supported("少年，踏上修仙之路，他在山洞", SOURCE)  # a 6-char window matches
+    assert not quote_supported("系统绑定", SOURCE) and not quote_supported("少年", SOURCE) and not quote_supported("", SOURCE)
+
+
 def test_parse_card_derives_genre_filters_vocabulary_and_records_drops() -> None:
-    card = parse_card("n1", "<think>x</think>" + RESPONSE, model="m")
+    card = parse_card("n1", "<think>x</think>" + RESPONSE, model="m", source_text=SOURCE)
     assert card.genre == "仙侠" and card.subgenre == "幻想修仙"
-    assert card.elements == ["凡人流", "修仙", "炼丹炼器"]  # 修真 -> 修仙 by alias, duplicate dropped
+    assert card.elements == ["凡人流", "修仙", "炼丹炼器"]  # 修真 -> 修仙 by alias; 系统's quote is not in the text
+    assert card.evidence == {"凡人流": "资质平平的少年", "修仙": "踏上修仙之路", "炼丹炼器": "炼制丹药", "subgenre": "踏上修仙之路"}
     assert card.style == {"爽度": "低", "基调": "沉重压抑", "感情线比重": "辅线", "主角起点": "普通", "节奏": ""}
     assert card.keywords == ["宗门", "炼气", "a", "b", "c"]  # 凡人流 / 修仙 repeat elements
-    assert card.dropped == ["element:不存在的标签", "style:节奏=飞快"]
+    assert card.dropped == ["element:不存在的标签", "element_unsupported:系统", "style:节奏=飞快"]
     text = card.text()
     assert text.startswith("题材：仙侠·幻想修仙") and "元素：凡人流、修仙、炼丹炼器" in text and "爽度 低" in text and "一句话：普通少年一步步修仙。" in text
 
@@ -53,7 +64,7 @@ def test_parse_card_derives_genre_filters_vocabulary_and_records_drops() -> None
 
 def test_prompt_carries_the_vocabulary_and_caps_the_digest() -> None:
     prompt = build_card_prompt("档案" * 5000, max_chars=100)
-    assert SUBGENRE_TO_GENRE and "幻想修仙" in prompt and ELEMENTS["系统"] in prompt and '"subgenre"' in prompt
+    assert SUBGENRE_TO_GENRE and "幻想修仙" in prompt and ELEMENTS["系统"] in prompt and '"subgenre_evidence"' in prompt and "逐字抄自档案" in prompt
     assert prompt.endswith("档案" * 50)
 
 
@@ -92,4 +103,5 @@ def test_frame_round_trip_card_section_and_report(tmp_path: Path) -> None:
 
     report = vocabulary_report(loaded)
     assert report["genres"] == {"仙侠": 1} and report["elements"]["修仙"] == 1 and report["dropped"] == {"element:不存在的标签": 1, "style:节奏=飞快": 1}
-    assert report["style"]["节奏"] == {"（空）": 1} and report["elements_per_card"] == 3.0
+    assert report["unsupported_elements"] == {}
+    assert report["style"]["节奏"] == {"（空）": 1} and report["elements_per_card"] == 4.0  # no source_text here, so 系统 is kept

@@ -16,6 +16,7 @@ judge labels are gone: those labels were produced under a different design.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -27,11 +28,13 @@ from src.config import DATA_DIR
 from src.llm_json import extract_json_object
 from src.retrieval.card_schema import ELEMENT_ALIASES, ELEMENTS, GENRES, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
 
-CARD_PROMPT_VERSION = "card_v2.1"
+CARD_PROMPT_VERSION = "card_v2.2"
 DEFAULT_CARDS_PATH = DATA_DIR / "processed" / "book_cards.parquet"
 DEFAULT_CARD_CACHE_PATH = DATA_DIR / "cache" / "book_cards.jsonl"
 LIST_FIELDS = ("elements", "keywords", "dropped")
-DICT_FIELDS = ("style",)
+DICT_FIELDS = ("style", "evidence")
+MIN_EVIDENCE_CHARS = 4
+EVIDENCE_WINDOW = 6
 
 
 @dataclass
@@ -46,7 +49,8 @@ class BookCard:
     tone: str = ""  # free one-phrase description, distinct from the 基调 scale
     one_liner: str = ""
     keywords: list[str] = field(default_factory=list)
-    dropped: list[str] = field(default_factory=list)  # labels the model used that are not in the vocabulary
+    dropped: list[str] = field(default_factory=list)  # labels the model used that are not in the vocabulary, or not backed by the text
+    evidence: dict[str, str] = field(default_factory=dict)  # element (and "subgenre") -> the quote the model gave
     model: str = ""
     prompt_version: str = CARD_PROMPT_VERSION
     error: str = ""
@@ -64,6 +68,7 @@ class BookCard:
             "one_liner": self.one_liner,
             "keywords": list(self.keywords),
             "dropped": list(self.dropped),
+            "evidence": dict(self.evidence),
             "model": self.model,
             "prompt_version": self.prompt_version,
             "error": self.error,
@@ -116,14 +121,16 @@ def build_card_prompt(profile_text: str, max_chars: int = DEFAULT_CARD_MAX_CHARS
         f"{vocabulary_text()}\n\n"
         "填写规则：\n"
         "- subgenre：从题材二级里选最贴切的一个，原样抄写二级名（不要写括号里的一级）；都不合适就填空字符串。\n"
-        "- elements：只列出档案里能看到依据的元素，原样抄写标签名，没有就给空列表；不要自己造标签。\n"
+        "- elements：只列出档案里能看到依据的元素。每个元素附一段不超过 20 字的档案原文摘录作为依据，"
+        "必须逐字抄自档案，不能改写；写不出原文摘录的元素不要列。没有就给空对象。不要自己造标签。\n"
+        "- subgenre_evidence：支持所选二级的一句原文摘录，不超过 20 字。\n"
         "- style：五项每项选一档，原样抄写档位。\n"
         "- protagonist / setting：各不超过 30 字。tone：用一个短语描述这本书的气质，不超过 20 字。\n"
         "- one_liner：一句话简介，不超过 60 字，不剧透结局。\n"
         f"- keywords：最多 {MAX_KEYWORDS} 个类型词，只写词表里没有、但读者找书时会用的特点；"
         "不要重复已选的元素，不要写人名、虚构地名、机构名、书名；只有同人文可以写原作名；没有就给空列表。\n\n"
         "只输出一个 JSON 对象，不要其他文字，格式：\n"
-        '{"subgenre": "二级名", "elements": ["元素名", "元素名"], '
+        '{"subgenre": "二级名", "subgenre_evidence": "原文摘录", "elements": {"元素名": "原文摘录", "元素名": "原文摘录"}, '
         f"\"style\": {{{style_json}}}, "
         '"protagonist": "...", "setting": "...", "tone": "...", "one_liner": "...", "keywords": ["..."]}\n\n'
         f"【档案】\n{profile_text[:max_chars]}"
@@ -141,6 +148,31 @@ def _strs(value: Any, limit: int, max_len: int = 40) -> list[str]:
         if text and text not in out:
             out.append(text)
     return out[:limit]
+
+
+_NORMALISE_RE = re.compile(r"[\s，。！？、：；“”‘’\"'（）()《》【】…—\-,.!?:;]+")
+
+
+def _normalise(text: str) -> str:
+    return _NORMALISE_RE.sub("", text)
+
+
+def quote_supported(quote: str, source_text: str) -> bool:
+    """Does the model's quote actually occur in the text it read?
+
+    Exact match after stripping whitespace and punctuation; a longer quote also passes when
+    any 6-character window of it occurs, which tolerates a trimmed or slightly misremembered
+    edge but not a paraphrase. Short quotes (under 4 characters) never count as evidence.
+    """
+
+    q, src = _normalise(quote), _normalise(source_text)
+    if len(q) < MIN_EVIDENCE_CHARS:
+        return False
+    if q in src:
+        return True
+    if len(q) >= EVIDENCE_WINDOW + 2:
+        return any(q[i : i + EVIDENCE_WINDOW] in src for i in range(0, len(q) - EVIDENCE_WINDOW + 1))
+    return False
 
 
 def normalise_subgenre(raw: str) -> tuple[str, str]:
@@ -167,7 +199,7 @@ def normalise_subgenre(raw: str) -> tuple[str, str]:
     return "", UNKNOWN_GENRE
 
 
-def parse_card(novel_id: str, text: str, model: str = "") -> BookCard:
+def parse_card(novel_id: str, text: str, model: str = "", source_text: str | None = None) -> BookCard:
     data = extract_json_object(text)
     dropped: list[str] = []
 
@@ -177,13 +209,30 @@ def parse_card(novel_id: str, text: str, model: str = "") -> BookCard:
         dropped.append(f"subgenre_missing:{raw_subgenre}" if genre != UNKNOWN_GENRE else f"subgenre:{raw_subgenre}")
 
     elements: list[str] = []
-    for label in _strs(data.get("elements"), 100):
+    evidence: dict[str, str] = {}
+    raw_elements = data.get("elements")
+    if isinstance(raw_elements, Mapping):
+        pairs = [(str(k).strip(), str(v or "").strip()) for k, v in raw_elements.items()]
+    else:
+        pairs = [(label, "") for label in _strs(raw_elements, 100)]
+    for label, quote in pairs:
         canonical = ELEMENT_ALIASES.get(label, label)
-        if canonical in ELEMENTS:
-            if canonical not in elements:
-                elements.append(canonical)
-        else:
+        if canonical not in ELEMENTS:
             dropped.append(f"element:{label}")
+            continue
+        if source_text is not None:
+            if not quote_supported(quote, source_text):
+                dropped.append(f"element_unsupported:{canonical}")
+                continue
+        if canonical not in elements:
+            elements.append(canonical)
+            if quote:
+                evidence[canonical] = quote[:40]
+    sub_quote = str(data.get("subgenre_evidence", "") or "").strip()
+    if sub_quote:
+        evidence["subgenre"] = sub_quote[:40]
+        if source_text is not None and not quote_supported(sub_quote, source_text):
+            dropped.append("subgenre_evidence_unsupported")
 
     style: dict[str, str] = {}
     raw_style = data.get("style") if isinstance(data.get("style"), Mapping) else {}
@@ -209,6 +258,7 @@ def parse_card(novel_id: str, text: str, model: str = "") -> BookCard:
         one_liner=str(data.get("one_liner", "") or "")[:80],
         keywords=keywords,
         dropped=dropped,
+        evidence=evidence,
         model=model,
     )
 
@@ -254,7 +304,7 @@ class CardBuilder:
             return BookCard.from_dict(cached)
         response = self.transport.complete(build_card_prompt(profile_text, self.max_chars), max_tokens=self.max_tokens)
         try:
-            card = parse_card(novel_id, response, model=self.model_name)
+            card = parse_card(novel_id, response, model=self.model_name, source_text=profile_text[: self.max_chars])
         except (ValueError, json.JSONDecodeError, TypeError) as exc:
             # Not cached: a parse failure is this call's failure, not a fact about the book.
             return BookCard(novel_id, model=self.model_name, error=f"parse: {type(exc).__name__}")
@@ -336,6 +386,7 @@ def vocabulary_report(cards: Mapping[str, BookCard]) -> dict[str, Any]:
         "elements": dict(elements.most_common()),
         "style": {dim: dict(c.most_common()) for dim, c in style.items()},
         "dropped": dict(dropped.most_common(50)),
+        "unsupported_elements": dict(Counter(d.split(":", 1)[1] for d in dropped.elements() if d.startswith("element_unsupported:")).most_common()),
         "keywords_top": dict(keywords.most_common(60)),
         "keywords_distinct": len(keywords),
         "elements_per_card": round(sum(len(c.elements) for c in cards.values()) / max(len(cards), 1), 2),

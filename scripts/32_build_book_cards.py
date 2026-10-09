@@ -37,6 +37,9 @@ def main(
     cache: Path = typer.Option(DEFAULT_CARD_CACHE_PATH),
     limit: int | None = typer.Option(None, help="First N profiles (pilot)."),
     only_ids: Path | None = typer.Option(None, help="Text file of novel_ids to build, one per line."),
+    exclude_ids: Path | None = typer.Option(None, help="Text file of novel_ids to skip."),
+    sample: int | None = typer.Option(None, help="Random sample of N books (after --only-ids / --exclude-ids)."),
+    seed: int = typer.Option(7, help="Seed for --sample."),
     workers: int = typer.Option(2, help="Concurrent requests to the model server."),
     max_chars: int = typer.Option(DEFAULT_CARD_MAX_CHARS, help="Digest characters sent per book (default: the whole digest)."),
     checkpoint: int = typer.Option(200, help="Rewrite the parquet every N cards."),
@@ -51,6 +54,11 @@ def main(
     if only_ids is not None:
         wanted = {line.strip() for line in only_ids.read_text(encoding="utf-8").splitlines() if line.strip()}
         frame = frame[frame["novel_id"].astype(str).isin(wanted)]
+    if exclude_ids is not None:
+        skip = {line.strip() for line in exclude_ids.read_text(encoding="utf-8").splitlines() if line.strip()}
+        frame = frame[~frame["novel_id"].astype(str).isin(skip)]
+    if sample is not None:
+        frame = frame.sample(n=min(sample, len(frame)), random_state=seed).sort_index()
     if limit is not None:
         frame = frame.head(limit)
     items = [(str(r.novel_id), str(r.profile_text)) for r in frame.itertuples(index=False)]
@@ -95,6 +103,7 @@ def _report(cards_path: Path) -> None:
     console.print(f"cards {summary['cards']}  elements/card {summary['elements_per_card']}  distinct keywords {summary['keywords_distinct']}")
     console.print("genres:", summary["genres"])
     console.print("dropped (outside the vocabulary):", summary["dropped"])
+    console.print("elements the text did not back:", summary["unsupported_elements"])
     console.print(f"-> {out}")
 
 
