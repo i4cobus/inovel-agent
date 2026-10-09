@@ -28,7 +28,7 @@ from src.config import DATA_DIR
 from src.llm_json import extract_json_object
 from src.retrieval.card_schema import ELEMENT_ALIASES, ELEMENTS, GENRES, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
 
-CARD_PROMPT_VERSION = "card_v2.3"
+CARD_PROMPT_VERSION = "card_v2.4"
 DEFAULT_CARDS_PATH = DATA_DIR / "processed" / "book_cards.parquet"
 DEFAULT_CARD_CACHE_PATH = DATA_DIR / "cache" / "book_cards.jsonl"
 LIST_FIELDS = ("elements", "keywords", "dropped")
@@ -123,7 +123,8 @@ def build_card_prompt(profile_text: str, max_chars: int = DEFAULT_CARD_MAX_CHARS
         "- subgenre：从题材二级里选最贴切的一个，原样抄写二级名（不要写括号里的一级）；都不合适就填空字符串。"
         "有更具体的二级就不选泛的：写明真实朝代的历史书选对应朝代，不选架空历史；都市书只有出现超自然能力才选都市异能。\n"
         "- elements：只列出档案里能看到依据的元素。每个元素附一段不超过 20 字的档案原文摘录作为依据，"
-        "必须逐字抄自档案，不能改写；写不出原文摘录的元素不要列。没有就给空对象。不要自己造标签。"
+        "必须逐字抄自档案，不能改写；摘录不能是上面词表里的定义句、元素名或人名列表，必须是档案里的一句话；"
+        "写不出原文摘录的元素不要列。没有就给空对象。不要自己造标签。"
         "elements 是一层的对象（元素名 → 摘录），不要按分组名嵌套，分组名本身不是元素；风格维度不要写进 elements。\n"
         "- subgenre_evidence：支持所选二级的一句原文摘录，不超过 20 字。\n"
         "- style：五项每项选一档，原样抄写档位。\n"
@@ -175,6 +176,16 @@ def quote_supported(quote: str, source_text: str) -> bool:
     if len(q) >= EVIDENCE_WINDOW + 2:
         return any(q[i : i + EVIDENCE_WINDOW] in src for i in range(0, len(q) - EVIDENCE_WINDOW + 1))
     return False
+
+
+_VOCAB_NORM: str | None = None
+
+
+def _vocabulary_normalised() -> str:
+    global _VOCAB_NORM
+    if _VOCAB_NORM is None:
+        _VOCAB_NORM = _normalise(vocabulary_text())
+    return _VOCAB_NORM
 
 
 def _element_pairs(raw: Any) -> list[tuple[str, str]]:
@@ -256,7 +267,9 @@ def parse_card(novel_id: str, text: str, model: str = "", source_text: str | Non
             continue
         if source_text is not None:
             if not quote_supported(quote, source_text):
-                dropped.append(f"element_unsupported:{canonical}={quote[:40]}")
+                # The API models' favourite dodge is to paste the vocabulary's own definition as the quote.
+                kind = "element_definition" if _normalise(quote) and _normalise(quote) in _vocabulary_normalised() else "element_unsupported"
+                dropped.append(f"{kind}:{canonical}={quote[:40]}")
                 continue
         if canonical not in elements:
             elements.append(canonical)
@@ -464,6 +477,7 @@ def vocabulary_report(cards: Mapping[str, BookCard]) -> dict[str, Any]:
         "style": {dim: dict(c.most_common()) for dim, c in style.items()},
         "dropped": dict(dropped.most_common(50)),
         "unsupported_elements": dict(Counter(d.split(":", 1)[1].split("=", 1)[0] for d in dropped.elements() if d.startswith("element_unsupported:")).most_common()),
+        "definition_copied": sum(1 for d in dropped.elements() if d.startswith("element_definition:")),
         "keywords_top": dict(keywords.most_common(60)),
         "keywords_distinct": len(keywords),
         "elements_per_card": round(sum(len(c.elements) for c in cards.values()) / max(len(cards), 1), 2),

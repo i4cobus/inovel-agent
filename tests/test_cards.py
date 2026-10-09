@@ -12,7 +12,7 @@ RESPONSE = json.dumps(
         "subgenre": "幻想修仙",
         "subgenre_evidence": "踏上修仙之路",
         "elements": {"凡人流": "资质平平的少年", "修真": "踏上修仙之路", "炼丹炼器": "炼制丹药", "不存在的标签": "x", "系统": "叮，系统绑定成功"},
-        "style": {"爽度": "低", "基调": "沉重压抑", "感情线比重": "辅线", "主角起点": "普通", "节奏": "飞快"},
+        "style": {"爽度": "低", "基调": "沉重压抑", "感情线比重": "辅线", "主角起点": "超强", "节奏": "快"},
         "protagonist": "资质普通的少年",
         "setting": "修仙界",
         "tone": "沉稳",
@@ -27,7 +27,7 @@ def test_schema_is_consistent() -> None:
     subs = [s for v in SUBGENRES.values() for s in v]
     assert len(subs) == len(set(subs)) and len(GENRES) == 12 and "现实" not in GENRES
     assert all(genre_of(s) in GENRES for s in subs) and genre_of("瞎编") == "其他"
-    assert 40 <= len(ELEMENTS) <= 50 and set(STYLE_OPTIONS) == {"爽度", "基调", "感情线比重", "主角起点", "节奏"}
+    assert 40 <= len(ELEMENTS) <= 50 and set(STYLE_OPTIONS) == {"爽度", "基调", "感情线比重", "主角起点"}
     text = vocabulary_text()
     assert "高武世界（玄幻）" in text and ELEMENTS["后宫"] in text and "开局无敌 / 普通 / 废柴逆袭" in text
     assert normalise_subgenre("修真文明") == ("修真文明", "仙侠") and normalise_subgenre("仙侠：修真文明") == ("修真文明", "仙侠")
@@ -49,9 +49,9 @@ def test_parse_card_derives_genre_filters_vocabulary_and_records_drops() -> None
     assert card.genre == "仙侠" and card.subgenre == "幻想修仙"
     assert card.elements == ["凡人流", "修仙", "炼丹炼器"]  # 修真 -> 修仙 by alias; 系统's quote is not in the text
     assert card.evidence == {"凡人流": "资质平平的少年", "修仙": "踏上修仙之路", "炼丹炼器": "炼制丹药", "subgenre": "踏上修仙之路"}
-    assert card.style == {"爽度": "低", "基调": "沉重压抑", "感情线比重": "辅线", "主角起点": "普通", "节奏": ""}
+    assert card.style == {"爽度": "低", "基调": "沉重压抑", "感情线比重": "辅线", "主角起点": ""}  # 节奏 is no longer a scale and is ignored
     assert card.keywords == ["宗门", "炼气", "a", "b", "c"]  # 凡人流 / 修仙 repeat elements
-    assert card.dropped == ["element:不存在的标签", "element_unsupported:系统=叮，系统绑定成功", "style:节奏=飞快"]
+    assert card.dropped == ["element:不存在的标签", "element_unsupported:系统=叮，系统绑定成功", "style:主角起点=超强"]
     text = card.text()
     assert text.startswith("题材：仙侠·幻想修仙") and "元素：凡人流、修仙、炼丹炼器" in text and "爽度 低" in text and "一句话：普通少年一步步修仙。" in text
 
@@ -82,6 +82,9 @@ def test_parse_card_flattens_elements_nested_by_group_and_routes_style_home() ->
     assert card.elements == ["凡人流", "修仙"]
     assert card.dropped == ["element_unsupported:末世=x", "element_unsupported:群像="]
     assert card.style["爽度"] == "低" and card.style["基调"] == "沉重压抑"
+
+    copied = parse_card("n5", json.dumps({"subgenre": "幻想修仙", "elements": {"权谋": "朝堂、家族或势力之间的谋略博弈是主要看点", "修真": "踏上修仙之路"}}, ensure_ascii=False), source_text=SOURCE)
+    assert copied.elements == ["修仙"] and copied.dropped == ["element_definition:权谋=朝堂、家族或势力之间的谋略博弈是主要看点"]
 
 
 def test_prompt_carries_the_vocabulary_and_caps_the_digest() -> None:
@@ -132,6 +135,6 @@ def test_frame_round_trip_card_section_and_report(tmp_path: Path) -> None:
     assert texts[1].startswith("标题：《书》\n题材：仙侠·幻想修仙")
 
     report = vocabulary_report(loaded)
-    assert report["genres"] == {"仙侠": 1} and report["elements"]["修仙"] == 1 and report["dropped"] == {"element:不存在的标签": 1, "style:节奏=飞快": 1}
+    assert report["genres"] == {"仙侠": 1} and report["elements"]["修仙"] == 1 and report["dropped"] == {"element:不存在的标签": 1, "style:主角起点=超强": 1}
     assert report["unsupported_elements"] == {}
-    assert report["style"]["节奏"] == {"（空）": 1} and report["elements_per_card"] == 4.0  # no source_text here, so 系统 is kept
+    assert report["style"]["主角起点"] == {"（空）": 1} and report["elements_per_card"] == 4.0  # no source_text here, so 系统 is kept
