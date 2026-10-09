@@ -466,7 +466,7 @@ def vocabulary_report(cards: Mapping[str, BookCard]) -> dict[str, Any]:
         subgenres[card.subgenre or "（空）"] += 1
         elements.update(card.elements)
         for dim, value in card.style.items():
-            style[dim][value or "（空）"] += 1
+            style.setdefault(dim, Counter())[value or "（空）"] += 1  # older cards may carry a scale since dropped
         dropped.update(card.dropped)
         keywords.update(card.keywords)
     return {
