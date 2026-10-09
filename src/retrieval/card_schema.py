@@ -127,13 +127,10 @@ ELEMENT_GROUPS: dict[str, dict[str, str]] = {
 }
 ELEMENTS: dict[str, str] = {label: definition for group in ELEMENT_GROUPS.values() for label, definition in group.items()}
 
-# 摘录里必须出现的特征词：这些元素有可靠的词面，摘录里一个都没有就不算证据（记 element_weak_quote）。
-ELEMENT_QUOTE_SIGNATURES: dict[str, tuple[str, ...]] = {
-    "系统": ("系统", "面板", "任务", "签到", "奖励", "叮", "宿主", "积分", "抽奖", "商城"),
-    "修仙": ("修仙", "修真", "炼气", "筑基", "金丹", "元婴", "化神", "飞升", "灵根", "仙", "修士", "修为", "境界"),
-    "穿越": ("穿越", "穿到", "来到了", "来到这", "重生在", "魂穿", "身穿", "异世", "这个世界", "另一个世界", "附身"),
-    "重生": ("重生", "重活", "前世", "上一世", "上辈子", "回到了", "回到", "再来一次", "重来"),
-}
+# 摘录里必须出现的特征词（记 element_weak_quote）。v3 试点上量过：对 系统 / 修仙 / 穿越 / 重生 开门槛拦下 37 条，
+# 几乎全是真证据（"他本是地球上的一名普通上班族"、"怒气点：465"、"眼前弹出一个光屏"），v3 的 prompt 已经让摘录
+# 带上特征，词面门槛只剩误杀，所以清空；机制留着，以后某个元素的摘录又飘了再按元素加。
+ELEMENT_QUOTE_SIGNATURES: dict[str, tuple[str, ...]] = {}
 
 # 模型常写的近义词 / 二级题材名 -> 词表里的元素。
 ELEMENT_ALIASES: dict[str, str] = {

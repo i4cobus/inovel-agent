@@ -83,8 +83,16 @@ def test_parse_card_flattens_elements_nested_by_group_and_routes_style_home() ->
     assert card.dropped == ["element_unsupported:末世=x", "element_unsupported:后宫="]
     assert card.style["爽度"] == "低" and card.style["基调"] == "沉重压抑"
 
-    weak = parse_card("n6", json.dumps({"subgenre": "修真文明", "elements": {"系统": "这扇门的名字叫做次元之门", "修真": "踏上修仙之路"}}, ensure_ascii=False), source_text=SOURCE + "这扇门的名字叫做次元之门")
-    assert weak.subgenre == "幻想修仙" and weak.elements == ["修仙"] and weak.dropped == ["element_weak_quote:系统=这扇门的名字叫做次元之门"]
+    aliased = parse_card("n6", json.dumps({"subgenre": "修真文明", "elements": {"修真": "踏上修仙之路"}}, ensure_ascii=False), source_text=SOURCE)
+    assert aliased.subgenre == "幻想修仙" and aliased.elements == ["修仙"] and aliased.dropped == []
+    with_gate = {"系统": ("面板",)}
+    import src.retrieval.cards as cards_module
+    cards_module.ELEMENT_QUOTE_SIGNATURES.update(with_gate)
+    try:
+        weak = parse_card("n7", json.dumps({"subgenre": "幻想修仙", "elements": {"系统": "这扇门的名字叫做次元之门"}}, ensure_ascii=False), source_text=SOURCE + "这扇门的名字叫做次元之门")
+        assert weak.elements == [] and weak.dropped == ["element_weak_quote:系统=这扇门的名字叫做次元之门"]
+    finally:
+        cards_module.ELEMENT_QUOTE_SIGNATURES.clear()
     assert normalise_subgenre("军事：军旅生涯") == ("军旅特战", "军事") and normalise_subgenre("超级科技") == ("未来科技", "科幻")
 
     copied = parse_card("n5", json.dumps({"subgenre": "幻想修仙", "elements": {"权谋": "朝堂、家族或势力之间的谋略博弈是主要看点", "修真": "踏上修仙之路"}}, ensure_ascii=False), source_text=SOURCE)
