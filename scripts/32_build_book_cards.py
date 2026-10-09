@@ -1,7 +1,7 @@
-"""Build book cards with a local model, resumably, and validate the trope field.
+"""Build book cards with a local model, resumably, and report how it used the vocabulary.
 
-    uv run python scripts/32_build_book_cards.py --limit 50 --workers 2        # pilot
-    uv run python scripts/32_build_book_cards.py --validate                     # against the v1 judge labels
+    uv run python scripts/32_build_book_cards.py --only-ids eval/agent/cards_pilot_ids.txt --workers 2   # pilot
+    uv run python scripts/32_build_book_cards.py --report                                                 # vocabulary usage
 
 Every card is appended to data/cache/book_cards.jsonl as it is produced, so a
 killed run resumes where it stopped; the parquet is rewritten at the end and
@@ -10,7 +10,6 @@ every --checkpoint cards.
 
 from __future__ import annotations
 
-import csv
 import json
 import time
 from pathlib import Path
@@ -21,8 +20,7 @@ from rich.console import Console
 from src.agent.backends import DEFAULT_CHAT_BASE_URL
 from src.chat_transport import HTTPChatTransport
 from src.config import PROJECT_ROOT
-from src.preferences import META_LABEL_NEGATIVES
-from src.retrieval.cards import DEFAULT_CARD_CACHE_PATH, DEFAULT_CARD_MAX_CHARS, DEFAULT_CARDS_PATH, CardBuilder, cards_to_frame, load_cards, validate_tropes
+from src.retrieval.cards import DEFAULT_CARD_CACHE_PATH, DEFAULT_CARD_MAX_CHARS, DEFAULT_CARDS_PATH, CardBuilder, cards_to_frame, load_cards, vocabulary_report
 from src.vector_index import DEFAULT_PROFILES_PATH
 
 app = typer.Typer(add_completion=False)
@@ -42,11 +40,10 @@ def main(
     workers: int = typer.Option(2, help="Concurrent requests to the model server."),
     max_chars: int = typer.Option(DEFAULT_CARD_MAX_CHARS, help="Digest characters sent per book (default: the whole digest)."),
     checkpoint: int = typer.Option(200, help="Rewrite the parquet every N cards."),
-    validate: bool = typer.Option(False, help="Only validate the existing parquet against the v1 judge labels."),
-    split: str = typer.Option("validate", help="Which half of eval/agent/cards_label_split.json to validate on: validate | heldout | all."),
+    report: bool = typer.Option(False, help="Only report vocabulary usage of the existing parquet."),
 ) -> None:
-    if validate:
-        _validate(out, split)
+    if report:
+        _report(out)
         return
     import pandas as pd
 
@@ -90,39 +87,15 @@ def _write(cards: list, out: Path) -> None:
     cards_to_frame(c for c in cards if not c.error).to_parquet(out, index=False)
 
 
-def _validate(cards_path: Path, split: str = "validate") -> None:
-    if split not in ("validate", "heldout", "all"):
-        raise typer.BadParameter("--split must be validate, heldout or all")
+def _report(cards_path: Path) -> None:
     cards = load_cards(cards_path)
-    allowed: set[str] | None = None
-    if split != "all":
-        split_path = PROJECT_ROOT / "eval" / "agent" / "cards_label_split.json"
-        allowed = set(json.loads(split_path.read_text(encoding="utf-8"))[split])
-    queries = {}
-    with (PROJECT_ROOT / "eval" / "eval_queries.jsonl").open(encoding="utf-8") as handle:
-        for line in handle:
-            if line.strip():
-                record = json.loads(line)
-                queries[record["query_id"]] = record
-    labels: dict[str, dict[str, bool]] = {}
-    for csv_path in sorted((PROJECT_ROOT / "eval" / "results").rglob("eval_results_judged*.csv")):
-        with csv_path.open(encoding="utf-8-sig", newline="") as handle:
-            for row in csv.DictReader(handle):
-                verdict = row.get("judge_constraint_violation", "")
-                if verdict == "":
-                    continue
-                unwanted = queries[row["query_id"]]["unwanted"]
-                metas = [t for t in unwanted if t in META_LABEL_NEGATIVES]
-                if len(metas) == 1 and len(unwanted) == 1 and (allowed is None or row["novel_id"] in allowed):
-                    labels.setdefault(metas[0], {})[row["novel_id"]] = verdict == "True"
-    report = validate_tropes(cards, labels)
-    out = cards_path.with_name(f"book_cards_validation_{split}.json")
-    out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    console.print("| trope | n | decided | unclear | missing | precision | recall | accuracy |")
-    console.print("|---|---|---|---|---|---|---|---|")
-    for trope, stats in sorted(report.items(), key=lambda kv: -kv[1]["n"]):
-        console.print(f"| {trope} | {stats['n']} | {stats['decided']} | {stats['unclear']} | {stats['missing']} | {stats['precision']} | {stats['recall']} | {stats['accuracy']} |")
-    console.print(f"split={split}  pairs={sum(len(v) for v in labels.values())}  -> {out}")
+    summary = vocabulary_report(cards)
+    out = cards_path.with_name("book_cards_vocabulary.json")
+    out.write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+    console.print(f"cards {summary['cards']}  elements/card {summary['elements_per_card']}  distinct keywords {summary['keywords_distinct']}")
+    console.print("genres:", summary["genres"])
+    console.print("dropped (outside the vocabulary):", summary["dropped"])
+    console.print(f"-> {out}")
 
 
 if __name__ == "__main__":

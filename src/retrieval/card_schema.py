@@ -1,0 +1,123 @@
+"""Book card vocabulary v2: genre (derived from a sub-genre), elements, style scales.
+
+Three layers, each answering one kind of question and verified one way
+(docs/card-schema-v2.md): the sub-genre says what kind of book it is, elements say
+whether a device or setting is present, style scales say how it reads. The
+vocabulary follows Qidian's public categories and tag practice and the words the
+local model used unprompted in the 120-book pilot; it is not Qidian's tag list.
+"""
+
+from __future__ import annotations
+
+# 一级题材 -> 二级候选。模型只选二级，一级由 SUBGENRE_TO_GENRE 推导。
+SUBGENRES: dict[str, tuple[str, ...]] = {
+    "玄幻": ("东方玄幻", "异世大陆", "王朝争霸", "高武世界"),
+    "奇幻": ("现代魔法", "剑与魔法", "史诗奇幻", "神秘幻想", "历史神话", "另类幻想"),
+    "武侠": ("传统武侠", "武侠幻想", "国术无双", "古武未来", "武侠同人"),
+    "仙侠": ("修真文明", "幻想修仙", "现代修真", "神话修真", "古典仙侠"),
+    "都市": ("都市生活", "都市异能", "异术超能", "青春校园", "娱乐明星", "商战职场", "时代叙事", "家庭伦理", "人间百态"),
+    "历史": ("架空历史", "秦汉三国", "上古先秦", "历史传记", "两晋隋唐", "五代十国", "两宋元明", "清史民国", "外国历史", "民间传说"),
+    "军事": ("军旅生涯", "军事战争", "战争幻想", "抗战烽火", "谍战特工"),
+    "科幻": ("古武机甲", "未来世界", "星际文明", "超级科技", "时空穿梭", "进化变异", "末世危机"),
+    "游戏": ("电子竞技", "虚拟网游", "游戏异界", "游戏系统", "游戏主播"),
+    "悬疑灵异": ("诡异神秘", "规则怪谈", "侦探推理", "灵异民俗", "惊悚微恐"),
+    "诸天无限": ("无限", "诸天", "综漫"),
+    "言情": ("古代言情", "现代言情", "幻想言情", "仙侠奇缘", "浪漫青春"),
+}
+GENRES: tuple[str, ...] = tuple(SUBGENRES)
+SUBGENRE_TO_GENRE: dict[str, str] = {sub: genre for genre, subs in SUBGENRES.items() for sub in subs}
+UNKNOWN_GENRE = "其他"
+
+# 元素：多选，封闭。每条是"看到什么就算有"的依据。分组只为 prompt 可读，输出平铺。
+ELEMENT_GROUPS: dict[str, dict[str, str]] = {
+    "主角来路": {
+        "穿越": "主角从另一个世界或时代来到故事世界",
+        "重生": "主角带着前世记忆回到过去或重活一次",
+        "穿书": "穿越进一本已知的小说、游戏或影视的世界",
+        "强者归来": "开篇主角已是强者，回到弱者身份或故地",
+    },
+    "外挂与体系": {
+        "系统": "有面板、任务、奖励、签到等游戏化外挂",
+        "随身空间": "随身携带的空间、位面、农场或仓库",
+        "无限流": "主角被投放进一个个独立副本或世界完成任务",
+        "诸天": "穿梭多个已知作品或世界，但不是副本制",
+        "御兽": "以收服、培养宠物、异兽或召唤物为主要战力",
+        "炼丹炼器": "丹药、炼器、阵法、符箓等技艺是主角的主要手段",
+        "卡牌": "以卡牌、技能卡、抽卡为核心体系",
+        "变身": "主角性别或种族发生变化并持续",
+    },
+    "流派": {
+        "升级流": "情节以境界或等级逐级提升为主线",
+        "凡人流": "主角资质平庸，靠谨慎、积累、运气缓慢变强",
+        "种田经营": "发展领地、家族、店铺、产业是主线",
+        "争霸建国": "势力扩张、攻城略地、建国称帝是主线",
+        "学院": "校园或学院是主要舞台",
+        "技术流": "以现代知识、科技、工业改变世界为主线",
+        "商战": "公司、资本、商业竞争是主线",
+        "官场": "体制内升迁、权力运作是主线",
+        "军旅": "当代军队生活或战争是主线",
+        "谍战": "情报、潜伏、反间是主线",
+        "娱乐圈": "演艺、文娱产业是主线",
+        "直播": "直播或主播是主要形式",
+        "游戏": "网游、电竞、游戏制作是主线",
+        "美食": "烹饪、餐饮是主线",
+        "医术": "医生、医术是主线",
+        "盗墓探险": "盗墓、探险、寻宝是主线",
+        "年代": "以 1949 至 2000 年代的中国为背景的现实生活",
+    },
+    "世界设定": {
+        "修仙": "修真、炼气、筑基、飞升等体系",
+        "高武": "现代或近未来社会里武道或超凡公开化",
+        "异能": "现代背景，人物拥有非修炼来源的特殊能力",
+        "末世": "文明崩溃后的生存",
+        "丧尸": "丧尸或僵尸是主要威胁",
+        "机甲星际": "机甲、星舰、星际文明",
+        "克苏鲁诡异": "不可名状、理智值、规则怪谈、诡异复苏",
+        "鬼怪灵异": "鬼、灵体、诅咒、凶宅等超自然恐怖",
+        "架空历史": "虚构朝代或改写了的真实历史",
+        "西方奇幻": "剑与魔法、精灵矮人、中世纪欧洲式世界",
+        "同人": "以已有作品为底本（关键词里写原作名）",
+    },
+    "感情与人物结构": {
+        "单女主": "有且只有一条稳定的感情线",
+        "无感情线": "没有感情线或感情线可忽略",
+        "后宫": "两名以上异性与主角并存的、被叙事认可的感情或伴侣关系",
+        "群像": "多视角、多主角，没有单一绝对主角",
+        "女主视角": "主角是女性且以女性视角叙事",
+    },
+}
+ELEMENTS: dict[str, str] = {label: definition for group in ELEMENT_GROUPS.values() for label, definition in group.items()}
+
+# 风格：每个维度单选。
+STYLE_DIMENSIONS: dict[str, tuple[tuple[str, ...], str]] = {
+    "爽度": (("高", "中", "低"), "高：冲突迅速解决、主角连续占上风、反复打脸；低：长期受挫、代价沉重"),
+    "基调": (("轻松搞笑", "热血", "沉重压抑", "温馨日常", "悬疑惊悚"), "取最主要的一种"),
+    "感情线比重": (("无", "辅线", "主线"), "主线：情节围绕两人关系推进"),
+    "主角起点": (("开局无敌", "普通", "废柴逆袭"), "开篇主角实力相对周围人的位置"),
+    "节奏": (("快", "中等", "慢热"), "情节推进速度"),
+}
+STYLE_OPTIONS: dict[str, tuple[str, ...]] = {dim: options for dim, (options, _) in STYLE_DIMENSIONS.items()}
+
+MAX_KEYWORDS = 5
+
+
+def genre_of(subgenre: str) -> str:
+    return SUBGENRE_TO_GENRE.get(subgenre, UNKNOWN_GENRE)
+
+
+def vocabulary_text() -> str:
+    """The vocabulary as the prompt shows it."""
+
+    lines = ["【题材二级，只能选一个】"]
+    for genre, subs in SUBGENRES.items():
+        lines.append(f"- {genre}：{'、'.join(subs)}")
+    lines.append("")
+    lines.append("【元素，多选，只列出有的；每条后面是算有的依据】")
+    for group, items in ELEMENT_GROUPS.items():
+        lines.append(f"{group}：")
+        lines.extend(f"- {label}：{definition}" for label, definition in items.items())
+    lines.append("")
+    lines.append("【风格，每项只能选一档】")
+    for dim, (options, definition) in STYLE_DIMENSIONS.items():
+        lines.append(f"- {dim}：{' / '.join(options)}（{definition}）")
+    return "\n".join(lines)

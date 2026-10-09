@@ -1,13 +1,16 @@
-"""Offline book cards: one structured record per novel, extracted by a local model from its profile.
+"""Offline book cards: one structured record per novel, extracted by a local model from its digest.
 
 The corpus is raw text with no metadata, and users ask for abstract things
-(凡人流、慢热、理性主角) that a vector over narrative excerpts does not match.
-A card gives every book a short structured description to embed and a trope
-field to filter on at retrieval time, which is what turns 「不要后宫」 from a
-post-hoc check into a pre-filter (design doc D9).
+(凡人流、慢热、不要系统) that a vector over narrative excerpts does not match.
+A card gives every book a short structured description to embed and closed
+vocabularies to filter on at retrieval time, which is what turns 「不要后宫」
+from a post-hoc check into a pre-filter (design doc D9).
 
-Reliability is measured before use: ``validate_tropes`` compares the trope
-field with the v1 judge's constraint labels (753 (trope, book) pairs).
+Schema v2 (docs/card-schema-v2.md): the model picks a sub-genre (the genre is
+derived), lists the elements that are present, rates five style scales, and
+writes short free fields. Unknown labels are dropped and recorded, so vocabulary
+drift is measurable. The v1 trope field and its validation against the v1
+judge labels are gone: those labels were produced under a different design.
 """
 
 from __future__ import annotations
@@ -19,31 +22,31 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
-from src.agent.trope import TROPE_GLOSSARY
 from src.chat_transport import ChatTransport
 from src.config import DATA_DIR
 from src.llm_json import extract_json_object
+from src.retrieval.card_schema import ELEMENTS, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
 
-CARD_PROMPT_VERSION = "card_v1"
+CARD_PROMPT_VERSION = "card_v2"
 DEFAULT_CARDS_PATH = DATA_DIR / "processed" / "book_cards.parquet"
 DEFAULT_CARD_CACHE_PATH = DATA_DIR / "cache" / "book_cards.jsonl"
-GENRES = ("仙侠", "玄幻", "都市", "历史", "武侠", "科幻", "悬疑", "网游", "种田", "西幻", "言情", "灵异", "军事", "同人", "其他")
-PACING = ("慢热", "中等", "快")
-TROPE_VALUES = ("yes", "no", "unclear")
+LIST_FIELDS = ("elements", "keywords", "dropped")
+DICT_FIELDS = ("style",)
 
 
 @dataclass
 class BookCard:
     novel_id: str
-    genre: str
-    subgenres: list[str]
-    tropes: dict[str, str]  # label -> yes | no | unclear
-    protagonist: str
-    setting: str
-    pacing: str
-    tone: str
-    one_liner: str
-    keywords: list[str]
+    genre: str = UNKNOWN_GENRE  # derived from subgenre
+    subgenre: str = ""
+    elements: list[str] = field(default_factory=list)
+    style: dict[str, str] = field(default_factory=dict)  # dimension -> option ("" when the model gave none)
+    protagonist: str = ""
+    setting: str = ""
+    tone: str = ""  # free one-phrase description, distinct from the 基调 scale
+    one_liner: str = ""
+    keywords: list[str] = field(default_factory=list)
+    dropped: list[str] = field(default_factory=list)  # labels the model used that are not in the vocabulary
     model: str = ""
     prompt_version: str = CARD_PROMPT_VERSION
     error: str = ""
@@ -52,14 +55,15 @@ class BookCard:
         return {
             "novel_id": self.novel_id,
             "genre": self.genre,
-            "subgenres": list(self.subgenres),
-            "tropes": dict(self.tropes),
+            "subgenre": self.subgenre,
+            "elements": list(self.elements),
+            "style": dict(self.style),
             "protagonist": self.protagonist,
             "setting": self.setting,
-            "pacing": self.pacing,
             "tone": self.tone,
             "one_liner": self.one_liner,
             "keywords": list(self.keywords),
+            "dropped": list(self.dropped),
             "model": self.model,
             "prompt_version": self.prompt_version,
             "error": self.error,
@@ -67,28 +71,31 @@ class BookCard:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "BookCard":
-        return cls(**{k: data.get(k, "" if k not in ("subgenres", "keywords", "tropes") else ({} if k == "tropes" else [])) for k in cls.__dataclass_fields__})
-
-    @property
-    def yes_tropes(self) -> list[str]:
-        return [t for t, v in self.tropes.items() if v == "yes"]
+        kwargs: dict[str, Any] = {}
+        for name in cls.__dataclass_fields__:
+            if name in LIST_FIELDS:
+                kwargs[name] = list(data.get(name) or [])
+            elif name in DICT_FIELDS:
+                kwargs[name] = dict(data.get(name) or {})
+            else:
+                kwargs[name] = data.get(name, cls.__dataclass_fields__[name].default if name != "novel_id" else "")
+        return cls(**kwargs)
 
     def text(self) -> str:
         """What gets embedded as the card section."""
 
-        parts = [f"题材：{self.genre}"]
-        if self.subgenres:
-            parts.append("子类：" + "、".join(self.subgenres))
+        parts = [f"题材：{self.genre}" + (f"·{self.subgenre}" if self.subgenre else "")]
+        if self.elements:
+            parts.append("元素：" + "、".join(self.elements))
+        style = "；".join(f"{dim} {value}" for dim, value in self.style.items() if value)
+        if style:
+            parts.append("风格：" + style)
         if self.protagonist:
             parts.append(f"主角：{self.protagonist}")
         if self.setting:
             parts.append(f"背景：{self.setting}")
-        if self.pacing:
-            parts.append(f"节奏：{self.pacing}")
         if self.tone:
-            parts.append(f"基调：{self.tone}")
-        if self.yes_tropes:
-            parts.append("标签：" + "、".join(self.yes_tropes))
+            parts.append(f"气质：{self.tone}")
         if self.keywords:
             parts.append("关键词：" + "、".join(self.keywords))
         if self.one_liner:
@@ -97,60 +104,82 @@ class BookCard:
 
 
 # A digest runs to 12k characters (16k for the few books without chapter structure); the default
-# sends it whole, about 10k tokens with the glossary. The old 4,000-character cut kept only the
-# blurb and two opening chapters, dropping the chapter titles and the ending the digest exists for.
+# sends it whole, about 10k tokens with the vocabulary.
 DEFAULT_CARD_MAX_CHARS = 16000
 
 
 def build_card_prompt(profile_text: str, max_chars: int = DEFAULT_CARD_MAX_CHARS) -> str:
-    glossary = "\n".join(f"- {label}：{definition}" for label, definition in TROPE_GLOSSARY.items())
+    style_json = ", ".join(f'"{dim}": "{"|".join(options)}"' for dim, options in STYLE_OPTIONS.items())
     return (
-        "下面是一本中文网文的档案：标题、简介、开头几章、采样的章节名、中段片段和结尾。请提炼一张结构化的书卡。只根据给出的文字判断，"
-        "不要用你对这本书的任何先验知识。\n\n"
-        f"题材只能从这些里选一个：{'、'.join(GENRES)}。\n"
-        f"节奏只能是：{'、'.join(PACING)}。\n"
-        "标签逐条判断，值只能是 yes / no / unclear：看到符合依据的内容判 yes，完全没有相关迹象判 no，"
-        "只有间接迹象或节选不足以判断时判 unclear。判 yes 的依据：\n"
-        f"{glossary}\n\n"
+        "下面是一本中文网文的档案：标题、简介、开头几章、采样的章节名、中段片段和结尾。请提炼一张结构化的书卡。"
+        "只根据给出的文字判断，不要用你对这本书的任何先验知识。\n\n"
+        f"{vocabulary_text()}\n\n"
+        "填写规则：\n"
+        "- subgenre：从题材二级里选最贴切的一个，原样抄写；都不合适就填空字符串。\n"
+        "- elements：只列出档案里能看到依据的元素，原样抄写标签名，没有就给空列表；不要自己造标签。\n"
+        "- style：五项每项选一档，原样抄写档位。\n"
+        "- protagonist / setting：各不超过 30 字。tone：用一个短语描述这本书的气质，不超过 20 字。\n"
+        "- one_liner：一句话简介，不超过 60 字，不剧透结局。\n"
+        f"- keywords：最多 {MAX_KEYWORDS} 个类型词，用来补充词表没覆盖的特点（如 反套路、咸鱼）。"
+        "不要写人名、虚构地名、机构名、书名；只有同人文可以写原作名。\n\n"
         "只输出一个 JSON 对象，不要其他文字，格式：\n"
-        '{"genre": "...", "subgenres": ["..."], "protagonist": "主角类型，不超过 30 字", "setting": "世界或时代背景，不超过 30 字", '
-        '"pacing": "慢热|中等|快", "tone": "基调，不超过 20 字", "one_liner": "一句话简介，不超过 60 字", '
-        '"keywords": ["5 到 10 个检索关键词"], "tropes": {"后宫": "yes|no|unclear", "...": "..."}}\n\n'
+        '{"subgenre": "...", "elements": ["...", "..."], '
+        f"\"style\": {{{style_json}}}, "
+        '"protagonist": "...", "setting": "...", "tone": "...", "one_liner": "...", "keywords": ["..."]}\n\n'
         f"【档案】\n{profile_text[:max_chars]}"
     )
 
 
+def _strs(value: Any, limit: int, max_len: int = 40) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        value = [value]
+    out: list[str] = []
+    for item in value:
+        text = str(item).strip()[:max_len]
+        if text and text not in out:
+            out.append(text)
+    return out[:limit]
+
+
 def parse_card(novel_id: str, text: str, model: str = "") -> BookCard:
     data = extract_json_object(text)
-    genre = str(data.get("genre", "")).strip()
-    if genre not in GENRES:
-        genre = "其他"
-    pacing = str(data.get("pacing", "")).strip()
-    if pacing not in PACING:
-        pacing = ""
-    raw_tropes = data.get("tropes") or {}
-    tropes: dict[str, str] = {}
-    for label in TROPE_GLOSSARY:
-        value = str(raw_tropes.get(label, "unclear")).strip().lower() if isinstance(raw_tropes, Mapping) else "unclear"
-        tropes[label] = value if value in TROPE_VALUES else "unclear"
+    dropped: list[str] = []
 
-    def strs(key: str, limit: int) -> list[str]:
-        value = data.get(key) or []
-        if not isinstance(value, list):
-            value = [value]
-        return [str(v).strip()[:40] for v in value if str(v).strip()][:limit]
+    subgenre = str(data.get("subgenre", "") or "").strip()
+    if subgenre and subgenre not in SUBGENRE_TO_GENRE:
+        dropped.append(f"subgenre:{subgenre}")
+        subgenre = ""
+
+    elements: list[str] = []
+    for label in _strs(data.get("elements"), 100):
+        if label in ELEMENTS:
+            elements.append(label)
+        else:
+            dropped.append(f"element:{label}")
+
+    style: dict[str, str] = {}
+    raw_style = data.get("style") if isinstance(data.get("style"), Mapping) else {}
+    for dim, options in STYLE_OPTIONS.items():
+        value = str(raw_style.get(dim, "") or "").strip()
+        if value and value not in options:
+            dropped.append(f"style:{dim}={value}")
+            value = ""
+        style[dim] = value
 
     return BookCard(
         novel_id=novel_id,
-        genre=genre,
-        subgenres=strs("subgenres", 5),
-        tropes=tropes,
-        protagonist=str(data.get("protagonist", ""))[:40],
-        setting=str(data.get("setting", ""))[:40],
-        pacing=pacing,
-        tone=str(data.get("tone", ""))[:30],
-        one_liner=str(data.get("one_liner", ""))[:80],
-        keywords=strs("keywords", 10),
+        genre=genre_of(subgenre) if subgenre else UNKNOWN_GENRE,
+        subgenre=subgenre,
+        elements=elements,
+        style=style,
+        protagonist=str(data.get("protagonist", "") or "")[:40],
+        setting=str(data.get("setting", "") or "")[:40],
+        tone=str(data.get("tone", "") or "")[:30],
+        one_liner=str(data.get("one_liner", "") or "")[:80],
+        keywords=_strs(data.get("keywords"), MAX_KEYWORDS, 20),
+        dropped=dropped,
         model=model,
     )
 
@@ -199,7 +228,7 @@ class CardBuilder:
             card = parse_card(novel_id, response, model=self.model_name)
         except (ValueError, json.JSONDecodeError, TypeError) as exc:
             # Not cached: a parse failure is this call's failure, not a fact about the book.
-            return BookCard(novel_id, "其他", [], {label: "unclear" for label in TROPE_GLOSSARY}, "", "", "", "", "", [], self.model_name, error=f"parse: {type(exc).__name__}")
+            return BookCard(novel_id, model=self.model_name, error=f"parse: {type(exc).__name__}")
         self._append(key, card.to_dict())
         return card
 
@@ -212,7 +241,7 @@ class CardBuilder:
             try:
                 results[index] = self.build_one(novel_id, text)
             except Exception as exc:  # noqa: BLE001 - one dead request must not kill the batch
-                results[index] = BookCard(novel_id, "其他", [], {label: "unclear" for label in TROPE_GLOSSARY}, "", "", "", "", "", [], self.model_name, error=f"{type(exc).__name__}: {exc}"[:200])
+                results[index] = BookCard(novel_id, model=self.model_name, error=f"{type(exc).__name__}: {exc}"[:200])
             if on_result is not None:
                 on_result(results[index])  # type: ignore[arg-type]
 
@@ -231,9 +260,8 @@ def cards_to_frame(cards: Iterable[BookCard]) -> Any:
     rows = []
     for card in cards:
         row = card.to_dict()
-        row["tropes"] = json.dumps(row["tropes"], ensure_ascii=False)
-        row["subgenres"] = json.dumps(row["subgenres"], ensure_ascii=False)
-        row["keywords"] = json.dumps(row["keywords"], ensure_ascii=False)
+        for name in LIST_FIELDS + DICT_FIELDS:
+            row[name] = json.dumps(row[name], ensure_ascii=False)
         row["card_text"] = card.text()
         rows.append(row)
     return pd.DataFrame(rows)
@@ -245,47 +273,41 @@ def load_cards(path: Path = DEFAULT_CARDS_PATH) -> dict[str, BookCard]:
     frame = pd.read_parquet(path)
     out: dict[str, BookCard] = {}
     for row in frame.to_dict(orient="records"):
-        row["tropes"] = json.loads(row["tropes"]) if isinstance(row["tropes"], str) else row["tropes"]
-        row["subgenres"] = json.loads(row["subgenres"]) if isinstance(row["subgenres"], str) else row["subgenres"]
-        row["keywords"] = json.loads(row["keywords"]) if isinstance(row["keywords"], str) else row["keywords"]
+        for name in LIST_FIELDS + DICT_FIELDS:
+            if isinstance(row.get(name), str):
+                row[name] = json.loads(row[name])
         row.pop("card_text", None)
         out[str(row["novel_id"])] = BookCard.from_dict(row)
     return out
 
 
-def validate_tropes(cards: Mapping[str, BookCard], labels: Mapping[str, Mapping[str, bool]]) -> dict[str, dict[str, Any]]:
-    """Per-trope precision / recall of ``tropes[label] == "yes"`` against judge labels.
+def vocabulary_report(cards: Mapping[str, BookCard]) -> dict[str, Any]:
+    """How the model used the vocabulary: per-label counts and what it tried to say outside it."""
 
-    ``labels`` is trope -> {novel_id -> judge said violated}. Books without a
-    card or with an unclear value are counted separately, not as negatives.
-    """
+    from collections import Counter
 
-    report: dict[str, dict[str, Any]] = {}
-    for trope, by_book in labels.items():
-        tp = fp = fn = tn = unclear = missing = 0
-        for novel_id, violated in by_book.items():
-            card = cards.get(novel_id)
-            if card is None:
-                missing += 1
-                continue
-            value = card.tropes.get(trope, "unclear")
-            if value == "unclear":
-                unclear += 1
-                continue
-            predicted = value == "yes"
-            tp += predicted and violated
-            fp += predicted and not violated
-            fn += (not predicted) and violated
-            tn += (not predicted) and not violated
-        decided = tp + fp + fn + tn
-        report[trope] = {
-            "n": len(by_book),
-            "decided": decided,
-            "unclear": unclear,
-            "missing": missing,
-            "precision": round(tp / (tp + fp), 3) if tp + fp else None,
-            "recall": round(tp / (tp + fn), 3) if tp + fn else None,
-            "accuracy": round((tp + tn) / decided, 3) if decided else None,
-            "positives": sum(1 for v in by_book.values() if v),
-        }
-    return report
+    genres: Counter[str] = Counter()
+    subgenres: Counter[str] = Counter()
+    elements: Counter[str] = Counter()
+    style: dict[str, Counter[str]] = {dim: Counter() for dim in STYLE_OPTIONS}
+    dropped: Counter[str] = Counter()
+    keywords: Counter[str] = Counter()
+    for card in cards.values():
+        genres[card.genre] += 1
+        subgenres[card.subgenre or "（空）"] += 1
+        elements.update(card.elements)
+        for dim, value in card.style.items():
+            style[dim][value or "（空）"] += 1
+        dropped.update(card.dropped)
+        keywords.update(card.keywords)
+    return {
+        "cards": len(cards),
+        "genres": dict(genres.most_common()),
+        "subgenres": dict(subgenres.most_common()),
+        "elements": dict(elements.most_common()),
+        "style": {dim: dict(c.most_common()) for dim, c in style.items()},
+        "dropped": dict(dropped.most_common(50)),
+        "keywords_top": dict(keywords.most_common(60)),
+        "keywords_distinct": len(keywords),
+        "elements_per_card": round(sum(len(c.elements) for c in cards.values()) / max(len(cards), 1), 2),
+    }

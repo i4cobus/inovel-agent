@@ -3,42 +3,53 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.agent.trope import TROPE_GLOSSARY
-from src.retrieval.cards import BookCard, CardBuilder, build_card_prompt, cards_to_frame, load_cards, parse_card, validate_tropes
+from src.retrieval.card_schema import ELEMENTS, GENRES, STYLE_OPTIONS, SUBGENRES, SUBGENRE_TO_GENRE, genre_of, vocabulary_text
+from src.retrieval.cards import BookCard, CardBuilder, build_card_prompt, cards_to_frame, load_cards, parse_card, vocabulary_report
 from src.retrieval.multivector import build_section_table
 
 RESPONSE = json.dumps(
     {
-        "genre": "仙侠",
-        "subgenres": ["凡人流"],
+        "subgenre": "幻想修仙",
+        "elements": ["凡人流", "修仙", "炼丹炼器", "凡人流", "不存在的标签"],
+        "style": {"爽度": "低", "基调": "沉重压抑", "感情线比重": "辅线", "主角起点": "普通", "节奏": "飞快"},
         "protagonist": "资质普通的少年",
         "setting": "修仙界",
-        "pacing": "慢热",
         "tone": "沉稳",
         "one_liner": "普通少年一步步修仙。",
-        "keywords": ["凡人流", "宗门", "炼气"],
-        "tropes": {"后宫": "no", "爽文": "unclear", "金手指": "YES", "不存在": "yes"},
+        "keywords": ["宗门", "炼气", "a", "b", "c", "d", "e"],
     },
     ensure_ascii=False,
 )
 
 
-def test_parse_card_normalises_fields_and_fills_every_trope() -> None:
+def test_schema_is_consistent() -> None:
+    subs = [s for v in SUBGENRES.values() for s in v]
+    assert len(subs) == len(set(subs)) and len(GENRES) == 12 and "现实" not in GENRES
+    assert all(genre_of(s) in GENRES for s in subs) and genre_of("瞎编") == "其他"
+    assert 40 <= len(ELEMENTS) <= 50 and set(STYLE_OPTIONS) == {"爽度", "基调", "感情线比重", "主角起点", "节奏"}
+    text = vocabulary_text()
+    assert "高武世界" in text and ELEMENTS["后宫"] in text and "开局无敌 / 普通 / 废柴逆袭" in text
+
+
+def test_parse_card_derives_genre_filters_vocabulary_and_records_drops() -> None:
     card = parse_card("n1", "<think>x</think>" + RESPONSE, model="m")
-    assert card.genre == "仙侠" and card.pacing == "慢热" and card.keywords == ["凡人流", "宗门", "炼气"]
-    assert set(card.tropes) == set(TROPE_GLOSSARY)
-    assert card.tropes["金手指"] == "yes" and card.tropes["后宫"] == "no" and card.tropes["圣母"] == "unclear"
-    assert card.yes_tropes == ["金手指"]
+    assert card.genre == "仙侠" and card.subgenre == "幻想修仙"
+    assert card.elements == ["凡人流", "修仙", "炼丹炼器"]
+    assert card.style == {"爽度": "低", "基调": "沉重压抑", "感情线比重": "辅线", "主角起点": "普通", "节奏": ""}
+    assert card.keywords == ["宗门", "炼气", "a", "b", "c"]
+    assert card.dropped == ["element:不存在的标签", "style:节奏=飞快"]
     text = card.text()
-    assert text.startswith("题材：仙侠") and "标签：金手指" in text and "一句话：普通少年一步步修仙。" in text
+    assert text.startswith("题材：仙侠·幻想修仙") and "元素：凡人流、修仙、炼丹炼器" in text and "爽度 低" in text and "一句话：普通少年一步步修仙。" in text
 
-    odd = parse_card("n2", '{"genre": "奇怪", "pacing": "飞快", "tropes": "none"}')
-    assert odd.genre == "其他" and odd.pacing == "" and all(v == "unclear" for v in odd.tropes.values())
+    odd = parse_card("n2", '{"subgenre": "奇怪", "elements": "系统", "style": "none"}')
+    assert odd.genre == "其他" and odd.subgenre == "" and odd.elements == ["系统"] and all(v == "" for v in odd.style.values())
+    assert odd.dropped == ["subgenre:奇怪"]
 
 
-def test_prompt_carries_the_glossary_and_caps_the_profile() -> None:
+def test_prompt_carries_the_vocabulary_and_caps_the_digest() -> None:
     prompt = build_card_prompt("档案" * 5000, max_chars=100)
-    assert TROPE_GLOSSARY["后宫"] in prompt and prompt.endswith("档案" * 50)
+    assert SUBGENRE_TO_GENRE and "幻想修仙" in prompt and ELEMENTS["系统"] in prompt and '"subgenre"' in prompt
+    assert prompt.endswith("档案" * 50)
 
 
 class FakeTransport:
@@ -55,14 +66,14 @@ def test_builder_caches_resumes_and_keeps_parse_failures_out_of_the_cache(tmp_pa
     builder = CardBuilder(transport, "m", cache_path=tmp_path / "c.jsonl")
     cards = builder.build_many([("a", "档案A"), ("b", "档案B")], workers=1)
     assert cards[0].genre == "仙侠" and cards[0].error == ""
-    assert cards[1].error.startswith("parse") and transport.calls == 2
+    assert cards[1].error.startswith("parse") and cards[1].genre == "其他" and transport.calls == 2
 
     again = CardBuilder(FakeTransport([RESPONSE]), "m", cache_path=tmp_path / "c.jsonl")
     cards = again.build_many([("a", "档案A"), ("b", "档案B")], workers=2)
     assert {c.novel_id: c.error for c in cards} == {"a": "", "b": ""}  # a from cache, b rebuilt
 
 
-def test_frame_round_trip_and_card_section(tmp_path: Path) -> None:
+def test_frame_round_trip_card_section_and_report(tmp_path: Path) -> None:
     card = parse_card("a", RESPONSE, model="m")
     frame = cards_to_frame([card])
     frame.to_parquet(tmp_path / "cards.parquet", index=False)
@@ -72,14 +83,8 @@ def test_frame_round_trip_and_card_section(tmp_path: Path) -> None:
     profiles = pd.DataFrame([{"novel_id": "a", "title_guess": "《书》", "profile_text": "标题：《书》\n\n内容简介：\n简介"}, {"novel_id": "b", "title_guess": "《乙》", "profile_text": "简介乙"}])
     texts, records = build_section_table(profiles, {"a": card.text()})
     assert [(r.novel_id, r.kind) for r in records] == [("a", "blurb"), ("a", "card"), ("b", "blurb")]
-    assert texts[1].startswith("标题：《书》\n题材：仙侠")
+    assert texts[1].startswith("标题：《书》\n题材：仙侠·幻想修仙")
 
-
-def test_validate_tropes_reports_precision_recall_and_undecided() -> None:
-    def card(novel_id: str, value: str) -> BookCard:
-        return BookCard(novel_id, "玄幻", [], {"爽文": value}, "", "", "", "", "", [])
-
-    cards = {"tp": card("tp", "yes"), "fp": card("fp", "yes"), "fn": card("fn", "no"), "tn": card("tn", "no"), "u": card("u", "unclear")}
-    labels = {"爽文": {"tp": True, "fp": False, "fn": True, "tn": False, "u": True, "missing": True}}
-    report = validate_tropes(cards, labels)["爽文"]
-    assert report == {"n": 6, "decided": 4, "unclear": 1, "missing": 1, "precision": 0.5, "recall": 0.5, "accuracy": 0.5, "positives": 4}
+    report = vocabulary_report(loaded)
+    assert report["genres"] == {"仙侠": 1} and report["elements"]["修仙"] == 1 and report["dropped"] == {"element:不存在的标签": 1, "style:节奏=飞快": 1}
+    assert report["style"]["节奏"] == {"（空）": 1} and report["elements_per_card"] == 3.0
