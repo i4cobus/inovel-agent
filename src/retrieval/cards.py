@@ -26,9 +26,9 @@ from typing import Any, Callable, Iterable, Mapping
 from src.chat_transport import ChatTransport
 from src.config import DATA_DIR
 from src.llm_json import extract_json_object
-from src.retrieval.card_schema import ELEMENT_ALIASES, ELEMENTS, GENRES, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
+from src.retrieval.card_schema import ELEMENT_ALIASES, ELEMENT_QUOTE_SIGNATURES, ELEMENTS, GENRES, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_ALIASES, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
 
-CARD_PROMPT_VERSION = "card_v2.4"
+CARD_PROMPT_VERSION = "card_v3"
 DEFAULT_CARDS_PATH = DATA_DIR / "processed" / "book_cards.parquet"
 DEFAULT_CARD_CACHE_PATH = DATA_DIR / "cache" / "book_cards.jsonl"
 LIST_FIELDS = ("elements", "keywords", "dropped")
@@ -114,20 +114,25 @@ DEFAULT_CARD_MAX_CHARS = 16000
 
 
 def build_card_prompt(profile_text: str, max_chars: int = DEFAULT_CARD_MAX_CHARS) -> str:
+    """The digest comes first and the rules last, so the instructions sit next to the answer."""
+
     style_json = ", ".join(f'"{dim}": "{"|".join(options)}"' for dim, options in STYLE_OPTIONS.items())
     return (
-        "下面是一本中文网文的档案：标题、简介、开头几章、采样的章节名、中段片段和结尾。请提炼一张结构化的书卡。"
-        "只根据给出的文字判断，不要用你对这本书的任何先验知识。\n\n"
+        "下面是一本中文网文的档案：标题、简介、开头几章、采样的章节名、中段片段和结尾。读完后按档案后面的词表和规则提炼一张结构化的书卡。\n\n"
+        f"【档案】\n{profile_text[:max_chars]}\n\n"
+        "【档案结束】\n\n"
         f"{vocabulary_text()}\n\n"
         "填写规则：\n"
-        "- subgenre：从题材二级里选最贴切的一个，原样抄写二级名（不要写括号里的一级）；都不合适就填空字符串。"
-        "有更具体的二级就不选泛的：写明真实朝代的历史书选对应朝代，不选架空历史；都市书只有出现超自然能力才选都市异能。\n"
-        "- elements：只列出档案里能看到依据的元素。每个元素附一段不超过 20 字的档案原文摘录作为依据，"
-        "必须逐字抄自档案，不能改写；摘录不能是上面词表里的定义句、元素名或人名列表，必须是档案里的一句话；"
-        "写不出原文摘录的元素不要列。没有就给空对象。不要自己造标签。"
+        "- 只根据档案判断，不要用你对这本书的任何先验知识。拿不准就不写：元素宁可少列，二级宁可留空，空比错好。\n"
+        "- 只看主角本人和主角所在的世界。书中书、副本、被扮演的作品、梦境里的设定，以及配角身上的描写，都不算这本书的元素。\n"
+        "- subgenre：从题材二级里选最贴切的一个，原样抄写二级名（不要写一级）；都不合适就填空字符串。"
+        "二级要和 one_liner、setting 说的是同一本书：主角穿梭多部已知作品的归诸天无限；写明真实朝代的历史书选对应朝代；都市书只有出现超自然能力或玄术才选都市异能。\n"
+        "- subgenre_evidence：支持所选二级的一句档案原文，不超过 20 字。\n"
+        "- elements：只列出档案里能看到依据的元素。每个元素附一段不超过 20 字的档案原文摘录，必须逐字抄自档案，不能改写。"
+        "摘录要直接体现该元素定义里的特征（比如系统要看到面板、任务、奖励之类的字样），不能是上面词表里的定义句、元素名或人名列表。"
+        "写不出这样的摘录就不要列这个元素。没有就给空对象。不要自己造标签。"
         "elements 是一层的对象（元素名 → 摘录），不要按分组名嵌套，分组名本身不是元素；风格维度不要写进 elements。\n"
-        "- subgenre_evidence：支持所选二级的一句原文摘录，不超过 20 字。\n"
-        "- style：五项每项选一档，原样抄写档位。\n"
+        f"- style：{len(STYLE_OPTIONS)} 项每项选一档，原样抄写档位。\n"
         "- protagonist / setting：各不超过 30 字。tone：用一个短语描述这本书的气质，不超过 20 字。\n"
         "- one_liner：一句话简介，不超过 60 字，不剧透结局。\n"
         f"- keywords：最多 {MAX_KEYWORDS} 个类型词，只写词表里没有、但读者找书时会用的特点；"
@@ -135,8 +140,7 @@ def build_card_prompt(profile_text: str, max_chars: int = DEFAULT_CARD_MAX_CHARS
         "只输出一个 JSON 对象，不要其他文字，格式：\n"
         '{"subgenre": "二级名", "subgenre_evidence": "原文摘录", "elements": {"元素名": "原文摘录", "元素名": "原文摘录"}, '
         f"\"style\": {{{style_json}}}, "
-        '"protagonist": "...", "setting": "...", "tone": "...", "one_liner": "...", "keywords": ["..."]}\n\n'
-        f"【档案】\n{profile_text[:max_chars]}"
+        '"protagonist": "...", "setting": "...", "tone": "...", "one_liner": "...", "keywords": ["..."]}'
     )
 
 
@@ -227,10 +231,10 @@ def normalise_subgenre(raw: str) -> tuple[str, str]:
     which is what the first v2 run did on 94 of 118 cards.
     """
 
-    text = raw.strip().strip("（）()")
+    text = SUBGENRE_ALIASES.get(raw.strip().strip("（）()"), raw.strip().strip("（）()"))
     for sep in ("：", ":", "·", "-", "/", "（", "("):
         if sep in text:
-            left, right = (part.strip(" （）()") for part in text.split(sep, 1))
+            left, right = (SUBGENRE_ALIASES.get(part.strip(" （）()"), part.strip(" （）()")) for part in text.split(sep, 1))
             if right in SUBGENRE_TO_GENRE:
                 return right, SUBGENRE_TO_GENRE[right]
             if left in SUBGENRE_TO_GENRE:
@@ -266,6 +270,11 @@ def parse_card(novel_id: str, text: str, model: str = "", source_text: str | Non
             dropped.append(f"element:{label}")
             continue
         if source_text is not None:
+            signature = ELEMENT_QUOTE_SIGNATURES.get(canonical)
+            if signature and quote and not any(word in quote for word in signature):
+                # A real quote, but one that does not show the element: "次元之门" offered for 系统.
+                dropped.append(f"element_weak_quote:{canonical}={quote[:40]}")
+                continue
             if not quote_supported(quote, source_text):
                 # The API models' favourite dodge is to paste the vocabulary's own definition as the quote.
                 kind = "element_definition" if _normalise(quote) and _normalise(quote) in _vocabulary_normalised() else "element_unsupported"
@@ -478,6 +487,7 @@ def vocabulary_report(cards: Mapping[str, BookCard]) -> dict[str, Any]:
         "dropped": dict(dropped.most_common(50)),
         "unsupported_elements": dict(Counter(d.split(":", 1)[1].split("=", 1)[0] for d in dropped.elements() if d.startswith("element_unsupported:")).most_common()),
         "definition_copied": sum(1 for d in dropped.elements() if d.startswith("element_definition:")),
+        "weak_quotes": sum(1 for d in dropped.elements() if d.startswith("element_weak_quote:")),
         "keywords_top": dict(keywords.most_common(60)),
         "keywords_distinct": len(keywords),
         "elements_per_card": round(sum(len(c.elements) for c in cards.values()) / max(len(cards), 1), 2),
