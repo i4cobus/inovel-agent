@@ -31,7 +31,8 @@ console = Console()
 def main(
     model: str = typer.Option("qwen3.5:9b"),
     base_url: str = typer.Option(DEFAULT_CHAT_BASE_URL),
-    reasoning_effort: str | None = typer.Option("none"),
+    reasoning_effort: str | None = typer.Option("none", help="Ollama: 'none' disables thinking; pass 'off' to send nothing (hosted APIs)."),
+    extra_body: str = typer.Option("", help='JSON merged into every request body, e.g. {"enable_thinking": false} for Bailian.'),
     profiles: Path = typer.Option(DEFAULT_PROFILES_PATH),
     out: Path = typer.Option(DEFAULT_CARDS_PATH),
     cache: Path = typer.Option(DEFAULT_CARD_CACHE_PATH),
@@ -64,7 +65,11 @@ def main(
     if limit is not None:
         frame = frame.head(limit)
     items = [(str(r.novel_id), str(r.profile_text)) for r in frame.itertuples(index=False)]
-    transport = HTTPChatTransport(model=model, base_url=base_url, reasoning_effort=reasoning_effort, timeout=300.0)
+    # Ollama switches thinking off through reasoning_effort; Bailian's OpenAI-compatible endpoint
+    # wants {"enable_thinking": false} in the body instead (--extra-body), with no reasoning_effort.
+    effort = reasoning_effort if reasoning_effort not in (None, "", "off") else None
+    body = json.loads(extra_body) if extra_body else {}
+    transport = HTTPChatTransport(model=model, base_url=base_url, reasoning_effort=effort, extra_body=body, timeout=300.0)
     builder = CardBuilder(transport, model, cache_path=cache, max_chars=max_chars, max_tokens=max_tokens)
     from src.retrieval.cards import card_cache_key
 
