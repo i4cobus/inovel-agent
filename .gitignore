@@ -39,3 +39,6 @@ tensorboard_log/
 
 # full evaluation trajectories and per-task memory files stay local; the redacted copies are committed
 data/eval_runs/
+
+# Private working notes: decision log, ops cheat sheet, prices, pitfalls. Mac only.
+knowledge/
