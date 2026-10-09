@@ -96,10 +96,16 @@ class BookCard:
         return "\n".join(parts)
 
 
-def build_card_prompt(profile_text: str, max_chars: int = 4000) -> str:
+# A digest runs to 12k characters (16k for the few books without chapter structure); the default
+# sends it whole, about 10k tokens with the glossary. The old 4,000-character cut kept only the
+# blurb and two opening chapters, dropping the chapter titles and the ending the digest exists for.
+DEFAULT_CARD_MAX_CHARS = 16000
+
+
+def build_card_prompt(profile_text: str, max_chars: int = DEFAULT_CARD_MAX_CHARS) -> str:
     glossary = "\n".join(f"- {label}：{definition}" for label, definition in TROPE_GLOSSARY.items())
     return (
-        "下面是一本中文网文的档案：标题、作者简介和若干章节节选。请提炼一张结构化的书卡。只根据给出的文字判断，"
+        "下面是一本中文网文的档案：标题、简介、开头几章、采样的章节名、中段片段和结尾。请提炼一张结构化的书卡。只根据给出的文字判断，"
         "不要用你对这本书的任何先验知识。\n\n"
         f"题材只能从这些里选一个：{'、'.join(GENRES)}。\n"
         f"节奏只能是：{'、'.join(PACING)}。\n"
@@ -156,7 +162,7 @@ def card_cache_key(novel_id: str, model: str) -> str:
 class CardBuilder:
     """Extract cards through a chat transport with a JSONL cache, resumable and thread-safe."""
 
-    def __init__(self, transport: ChatTransport, model_name: str, cache_path: Path = DEFAULT_CARD_CACHE_PATH, max_tokens: int = 700, max_chars: int = 4000) -> None:
+    def __init__(self, transport: ChatTransport, model_name: str, cache_path: Path = DEFAULT_CARD_CACHE_PATH, max_tokens: int = 700, max_chars: int = DEFAULT_CARD_MAX_CHARS) -> None:
         self.transport = transport
         self.model_name = model_name
         self.cache_path = cache_path

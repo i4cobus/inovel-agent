@@ -22,7 +22,7 @@ from src.agent.backends import DEFAULT_CHAT_BASE_URL
 from src.chat_transport import HTTPChatTransport
 from src.config import PROJECT_ROOT
 from src.preferences import META_LABEL_NEGATIVES
-from src.retrieval.cards import DEFAULT_CARD_CACHE_PATH, DEFAULT_CARDS_PATH, CardBuilder, cards_to_frame, load_cards, validate_tropes
+from src.retrieval.cards import DEFAULT_CARD_CACHE_PATH, DEFAULT_CARD_MAX_CHARS, DEFAULT_CARDS_PATH, CardBuilder, cards_to_frame, load_cards, validate_tropes
 from src.vector_index import DEFAULT_PROFILES_PATH
 
 app = typer.Typer(add_completion=False)
@@ -40,12 +40,13 @@ def main(
     limit: int | None = typer.Option(None, help="First N profiles (pilot)."),
     only_ids: Path | None = typer.Option(None, help="Text file of novel_ids to build, one per line."),
     workers: int = typer.Option(2, help="Concurrent requests to the model server."),
-    max_chars: int = typer.Option(4000, help="Profile characters sent per book."),
+    max_chars: int = typer.Option(DEFAULT_CARD_MAX_CHARS, help="Digest characters sent per book (default: the whole digest)."),
     checkpoint: int = typer.Option(200, help="Rewrite the parquet every N cards."),
     validate: bool = typer.Option(False, help="Only validate the existing parquet against the v1 judge labels."),
+    split: str = typer.Option("validate", help="Which half of eval/agent/cards_label_split.json to validate on: validate | heldout | all."),
 ) -> None:
     if validate:
-        _validate(out)
+        _validate(out, split)
         return
     import pandas as pd
 
@@ -89,8 +90,14 @@ def _write(cards: list, out: Path) -> None:
     cards_to_frame(c for c in cards if not c.error).to_parquet(out, index=False)
 
 
-def _validate(cards_path: Path) -> None:
+def _validate(cards_path: Path, split: str = "validate") -> None:
+    if split not in ("validate", "heldout", "all"):
+        raise typer.BadParameter("--split must be validate, heldout or all")
     cards = load_cards(cards_path)
+    allowed: set[str] | None = None
+    if split != "all":
+        split_path = PROJECT_ROOT / "eval" / "agent" / "cards_label_split.json"
+        allowed = set(json.loads(split_path.read_text(encoding="utf-8"))[split])
     queries = {}
     with (PROJECT_ROOT / "eval" / "eval_queries.jsonl").open(encoding="utf-8") as handle:
         for line in handle:
@@ -106,16 +113,16 @@ def _validate(cards_path: Path) -> None:
                     continue
                 unwanted = queries[row["query_id"]]["unwanted"]
                 metas = [t for t in unwanted if t in META_LABEL_NEGATIVES]
-                if len(metas) == 1 and len(unwanted) == 1:
+                if len(metas) == 1 and len(unwanted) == 1 and (allowed is None or row["novel_id"] in allowed):
                     labels.setdefault(metas[0], {})[row["novel_id"]] = verdict == "True"
     report = validate_tropes(cards, labels)
-    out = cards_path.with_name("book_cards_validation.json")
+    out = cards_path.with_name(f"book_cards_validation_{split}.json")
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     console.print("| trope | n | decided | unclear | missing | precision | recall | accuracy |")
     console.print("|---|---|---|---|---|---|---|---|")
     for trope, stats in sorted(report.items(), key=lambda kv: -kv[1]["n"]):
         console.print(f"| {trope} | {stats['n']} | {stats['decided']} | {stats['unclear']} | {stats['missing']} | {stats['precision']} | {stats['recall']} | {stats['accuracy']} |")
-    console.print(f"-> {out}")
+    console.print(f"split={split}  pairs={sum(len(v) for v in labels.values())}  -> {out}")
 
 
 if __name__ == "__main__":
