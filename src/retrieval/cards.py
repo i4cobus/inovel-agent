@@ -27,12 +27,12 @@ from src.chat_transport import ChatTransport
 from src.config import DATA_DIR
 from src.digest import DIGEST_VERSION
 from src.llm_json import extract_json_object
-from src.retrieval.card_schema import ELEMENT_ALIASES, ELEMENT_QUOTE_SIGNATURES, ELEMENTS, GENRES, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_ALIASES, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
+from src.retrieval.card_schema import ELEMENT_ALIASES, ELEMENT_EVIDENCE_NAMES, ELEMENT_QUOTE_SIGNATURES, ELEMENTS, GENRES, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_ALIASES, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
 
-CARD_PROMPT_VERSION = "card_v3"
+CARD_PROMPT_VERSION = "card_v3.1"
 DEFAULT_CARDS_PATH = DATA_DIR / "processed" / "book_cards.parquet"
 DEFAULT_CARD_CACHE_PATH = DATA_DIR / "cache" / "book_cards.jsonl"
-LIST_FIELDS = ("elements", "keywords", "dropped")
+LIST_FIELDS = ("elements", "elements_unverified", "keywords", "dropped")
 DICT_FIELDS = ("style", "evidence")
 MIN_EVIDENCE_CHARS = 4
 EVIDENCE_WINDOW = 6
@@ -44,6 +44,7 @@ class BookCard:
     genre: str = UNKNOWN_GENRE  # derived from subgenre
     subgenre: str = ""
     elements: list[str] = field(default_factory=list)
+    elements_unverified: list[str] = field(default_factory=list)  # the model claimed them but offered the vocabulary definition as evidence
     style: dict[str, str] = field(default_factory=dict)  # dimension -> option ("" when the model gave none)
     protagonist: str = ""
     setting: str = ""
@@ -62,6 +63,7 @@ class BookCard:
             "genre": self.genre,
             "subgenre": self.subgenre,
             "elements": list(self.elements),
+            "elements_unverified": list(self.elements_unverified),
             "style": dict(self.style),
             "protagonist": self.protagonist,
             "setting": self.setting,
@@ -93,6 +95,8 @@ class BookCard:
         parts = [f"题材：{self.genre}" + (f"·{self.subgenre}" if self.subgenre else "")]
         if self.elements:
             parts.append("元素：" + "、".join(self.elements))
+        if self.elements_unverified:
+            parts.append("疑似元素：" + "、".join(self.elements_unverified))
         style = "；".join(f"{dim} {value}" for dim, value in self.style.items() if value)
         if style:
             parts.append("风格：" + style)
@@ -118,6 +122,7 @@ def build_card_prompt(profile_text: str, max_chars: int = DEFAULT_CARD_MAX_CHARS
     """The digest comes first and the rules last, so the instructions sit next to the answer."""
 
     style_json = ", ".join(f'"{dim}": "{"|".join(options)}"' for dim, options in STYLE_OPTIONS.items())
+    names_rules = "".join(f"{label}例外：{rule}。" for label, rule in ELEMENT_EVIDENCE_NAMES.items())
     return (
         "下面是一本中文网文的档案：标题、简介、开头几章、采样的章节名、中段片段和结尾。读完后按档案后面的词表和规则提炼一张结构化的书卡。\n\n"
         f"【档案】\n{profile_text[:max_chars]}\n\n"
@@ -132,6 +137,7 @@ def build_card_prompt(profile_text: str, max_chars: int = DEFAULT_CARD_MAX_CHARS
         "- elements：只列出档案里能看到依据的元素。每个元素附一段不超过 20 字的档案原文摘录，必须逐字抄自档案，不能改写。"
         "摘录要直接体现该元素定义里的特征（比如系统要看到面板、任务、奖励之类的字样），不能是上面词表里的定义句、元素名或人名列表。"
         "写不出这样的摘录就不要列这个元素。没有就给空对象。不要自己造标签。"
+        f"{names_rules}"
         "elements 是一层的对象（元素名 → 摘录），不要按分组名嵌套，分组名本身不是元素；风格维度不要写进 elements。\n"
         f"- style：{len(STYLE_OPTIONS)} 项每项选一档，原样抄写档位。\n"
         "- protagonist / setting：各不超过 30 字。tone：用一个短语描述这本书的气质，不超过 20 字。\n"
@@ -259,6 +265,7 @@ def parse_card(novel_id: str, text: str, model: str = "", source_text: str | Non
         dropped.append(f"subgenre_missing:{raw_subgenre}" if genre != UNKNOWN_GENRE else f"subgenre:{raw_subgenre}")
 
     elements: list[str] = []
+    elements_unverified: list[str] = []
     evidence: dict[str, str] = {}
     style_in_elements: dict[str, str] = {}
     for label, quote in _element_pairs(data.get("elements")):
@@ -270,6 +277,16 @@ def parse_card(novel_id: str, text: str, model: str = "", source_text: str | Non
         if canonical not in ELEMENTS:
             dropped.append(f"element:{label}")
             continue
+        if canonical in ELEMENT_EVIDENCE_NAMES:
+            names = [n.strip() for n in re.split(r"[、，,/ 和及与]+", quote) if len(n.strip()) >= 2]
+            found = [n for n in names if source_text is None or n in source_text]
+            if len(found) >= 2:
+                if canonical not in elements:
+                    elements.append(canonical)
+                    evidence[canonical] = "、".join(found)[:40]
+            else:
+                dropped.append(f"element_unsupported:{canonical}={quote[:40]}")
+            continue
         if source_text is not None:
             signature = ELEMENT_QUOTE_SIGNATURES.get(canonical)
             if signature and quote and not any(word in quote for word in signature):
@@ -280,6 +297,9 @@ def parse_card(novel_id: str, text: str, model: str = "", source_text: str | Non
                 # The API models' favourite dodge is to paste the vocabulary's own definition as the quote.
                 kind = "element_definition" if _normalise(quote) and _normalise(quote) in _vocabulary_normalised() else "element_unsupported"
                 dropped.append(f"{kind}:{canonical}={quote[:40]}")
+                if kind == "element_definition" and canonical not in elements_unverified:
+                    # The claim is kept, marked: the model asserted the element but could not point at a line.
+                    elements_unverified.append(canonical)
                 continue
         if canonical not in elements:
             elements.append(canonical)
@@ -300,7 +320,7 @@ def parse_card(novel_id: str, text: str, model: str = "", source_text: str | Non
             value = ""
         style[dim] = value
 
-    taken = set(elements) | {subgenre, genre}
+    taken = set(elements) | set(elements_unverified) | {subgenre, genre}
     keywords = [k for k in _strs(data.get("keywords"), 20, 20) if k not in taken and ELEMENT_ALIASES.get(k, k) not in taken][:MAX_KEYWORDS]
 
     return BookCard(
@@ -308,6 +328,7 @@ def parse_card(novel_id: str, text: str, model: str = "", source_text: str | Non
         genre=genre,
         subgenre=subgenre,
         elements=elements,
+        elements_unverified=[e for e in elements_unverified if e not in elements],
         style=style,
         protagonist=str(data.get("protagonist", "") or "")[:40],
         setting=str(data.get("setting", "") or "")[:40],
@@ -491,6 +512,7 @@ def vocabulary_report(cards: Mapping[str, BookCard]) -> dict[str, Any]:
         "unsupported_elements": dict(Counter(d.split(":", 1)[1].split("=", 1)[0] for d in dropped.elements() if d.startswith("element_unsupported:")).most_common()),
         "definition_copied": sum(1 for d in dropped.elements() if d.startswith("element_definition:")),
         "weak_quotes": sum(1 for d in dropped.elements() if d.startswith("element_weak_quote:")),
+        "elements_unverified": dict(Counter(e for card in cards.values() for e in card.elements_unverified).most_common()),
         "keywords_top": dict(keywords.most_common(60)),
         "keywords_distinct": len(keywords),
         "elements_per_card": round(sum(len(c.elements) for c in cards.values()) / max(len(cards), 1), 2),

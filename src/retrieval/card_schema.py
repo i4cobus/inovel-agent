@@ -132,6 +132,13 @@ ELEMENTS: dict[str, str] = {label: definition for group in ELEMENT_GROUPS.values
 # 带上特征，词面门槛只剩误杀，所以清空；机制留着，以后某个元素的摘录又飘了再按元素加。
 ELEMENT_QUOTE_SIGNATURES: dict[str, tuple[str, ...]] = {}
 
+# Elements whose evidence is a list of names rather than a quote. A harem is spread over many scenes
+# (six girls in six chapters), no 20-character sentence proves it, and Flash copied the definition
+# instead on 10 of 116 pilot cards; two names that both occur in the digest are checkable evidence.
+ELEMENT_EVIDENCE_NAMES: dict[str, str] = {
+    "后宫": "依据不写摘录，写两位以上与主角有感情或伴侣关系的异性名字，用、分隔，名字必须在档案里出现过",
+}
+
 # 模型常写的近义词 / 二级题材名 -> 词表里的元素。
 ELEMENT_ALIASES: dict[str, str] = {
     "空间": "随身空间", "随身农场": "随身空间", "系统流": "系统", "金手指": "系统",

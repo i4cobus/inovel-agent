@@ -38,7 +38,7 @@ def sample_order(novel_id: str) -> str:
     return hashlib.md5(f"review:{novel_id}".encode()).hexdigest()
 
 
-CARD_FIELDS = ("genre", "subgenre", "elements", "style", "protagonist", "setting", "tone", "one_liner", "keywords", "dropped", "evidence", "model", "prompt_version")
+CARD_FIELDS = ("genre", "subgenre", "elements", "elements_unverified", "style", "protagonist", "setting", "tone", "one_liner", "keywords", "dropped", "evidence", "model", "prompt_version")
 
 
 def parse_card_sets(specs: list[Path]) -> list[tuple[str, Path]]:
@@ -258,7 +258,7 @@ function renderCard() {
     <p class="one">${esc(c.one_liner)}</p>
     ${(c.evidence||{}).subgenre ? `<div class="hint">二级依据：“${esc(c.evidence.subgenre)}”</div>` : ''}
     <dl class="kv"><dt>主角</dt><dd>${esc(c.protagonist)}</dd><dt>背景</dt><dd>${esc(c.setting)}</dd><dt>气质</dt><dd>${esc(c.tone)}</dd><dt>关键词</dt><dd><div class="chips">${c.keywords.map(k=>`<span class="chip">${esc(k)}</span>`).join('')||'<span class="hint">无</span>'}</div></dd>${droppedRows(c.dropped)}</dl>
-    <div><h4>元素（${c.elements.length}）· 点一下 ✓ 对，再点 ✗ 错，再点清除</h4><div class="chips">${c.elements.map(chip).join('')||'<span class="hint">无</span>'}</div></div>
+    <div><h4>元素（${c.elements.length}）· 点一下 ✓ 对，再点 ✗ 错，再点清除</h4><div class="chips">${c.elements.map(chip).join('')||'<span class="hint">无</span>'}${(c.elements_unverified||[]).map(t=>`<span class="chip u" title="模型说有，但给的依据是词表定义而不是原文">${esc(t)}<span class="m">待核</span></span>`).join('')}</div></div>
     ${cmp}
     <div class="review">
       <h4>人工审阅 · 风格档位</h4>

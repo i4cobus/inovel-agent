@@ -97,6 +97,14 @@ def test_parse_card_flattens_elements_nested_by_group_and_routes_style_home() ->
 
     copied = parse_card("n5", json.dumps({"subgenre": "幻想修仙", "elements": {"权谋": "朝堂、家族或势力之间的谋略博弈是主要看点", "修真": "踏上修仙之路"}}, ensure_ascii=False), source_text=SOURCE)
     assert copied.elements == ["修仙"] and copied.dropped == ["element_definition:权谋=朝堂、家族或势力之间的谋略博弈是主要看点"]
+    assert copied.elements_unverified == ["权谋"] and "疑似元素：权谋" in copied.text()
+
+    harem_src = SOURCE + "苏雨妍笑了。森下丽香也来了。"
+    harem = parse_card("n8", json.dumps({"subgenre": "现代言情", "elements": {"后宫": "苏雨妍、森下丽香、不存在的人"}}, ensure_ascii=False), source_text=harem_src)
+    assert harem.elements == ["后宫"] and harem.evidence["后宫"] == "苏雨妍、森下丽香" and harem.dropped == []
+    lone = parse_card("n9", json.dumps({"elements": {"后宫": "苏雨妍"}}, ensure_ascii=False), source_text=harem_src)
+    assert lone.elements == [] and lone.dropped == ["element_unsupported:后宫=苏雨妍"]
+    assert BookCard.from_dict(copied.to_dict()).elements_unverified == ["权谋"]
 
 
 def test_prompt_carries_the_vocabulary_and_caps_the_digest() -> None:
