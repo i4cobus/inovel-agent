@@ -4,19 +4,19 @@ from pathlib import Path
 import pandas as pd
 
 from src.retrieval.card_schema import ELEMENTS, GENRES, STYLE_OPTIONS, SUBGENRES, SUBGENRE_TO_GENRE, genre_of, vocabulary_text
-from src.retrieval.cards import BookCard, CardBuilder, build_card_prompt, cards_to_frame, load_cards, parse_card, vocabulary_report
+from src.retrieval.cards import BookCard, CardBuilder, build_card_prompt, cards_to_frame, load_cards, normalise_subgenre, parse_card, vocabulary_report
 from src.retrieval.multivector import build_section_table
 
 RESPONSE = json.dumps(
     {
         "subgenre": "幻想修仙",
-        "elements": ["凡人流", "修仙", "炼丹炼器", "凡人流", "不存在的标签"],
+        "elements": ["凡人流", "修真", "炼丹炼器", "凡人流", "不存在的标签"],
         "style": {"爽度": "低", "基调": "沉重压抑", "感情线比重": "辅线", "主角起点": "普通", "节奏": "飞快"},
         "protagonist": "资质普通的少年",
         "setting": "修仙界",
         "tone": "沉稳",
         "one_liner": "普通少年一步步修仙。",
-        "keywords": ["宗门", "炼气", "a", "b", "c", "d", "e"],
+        "keywords": ["凡人流", "修仙", "宗门", "炼气", "a", "b", "c", "d", "e"],
     },
     ensure_ascii=False,
 )
@@ -28,15 +28,18 @@ def test_schema_is_consistent() -> None:
     assert all(genre_of(s) in GENRES for s in subs) and genre_of("瞎编") == "其他"
     assert 40 <= len(ELEMENTS) <= 50 and set(STYLE_OPTIONS) == {"爽度", "基调", "感情线比重", "主角起点", "节奏"}
     text = vocabulary_text()
-    assert "高武世界" in text and ELEMENTS["后宫"] in text and "开局无敌 / 普通 / 废柴逆袭" in text
+    assert "高武世界（玄幻）" in text and ELEMENTS["后宫"] in text and "开局无敌 / 普通 / 废柴逆袭" in text
+    assert normalise_subgenre("修真文明") == ("修真文明", "仙侠") and normalise_subgenre("仙侠：修真文明") == ("修真文明", "仙侠")
+    assert normalise_subgenre("修真文明（仙侠）") == ("修真文明", "仙侠") and normalise_subgenre("都市") == ("", "都市")
+    assert normalise_subgenre("瞎编") == ("", "其他") and normalise_subgenre("") == ("", "其他")
 
 
 def test_parse_card_derives_genre_filters_vocabulary_and_records_drops() -> None:
     card = parse_card("n1", "<think>x</think>" + RESPONSE, model="m")
     assert card.genre == "仙侠" and card.subgenre == "幻想修仙"
-    assert card.elements == ["凡人流", "修仙", "炼丹炼器"]
+    assert card.elements == ["凡人流", "修仙", "炼丹炼器"]  # 修真 -> 修仙 by alias, duplicate dropped
     assert card.style == {"爽度": "低", "基调": "沉重压抑", "感情线比重": "辅线", "主角起点": "普通", "节奏": ""}
-    assert card.keywords == ["宗门", "炼气", "a", "b", "c"]
+    assert card.keywords == ["宗门", "炼气", "a", "b", "c"]  # 凡人流 / 修仙 repeat elements
     assert card.dropped == ["element:不存在的标签", "style:节奏=飞快"]
     text = card.text()
     assert text.startswith("题材：仙侠·幻想修仙") and "元素：凡人流、修仙、炼丹炼器" in text and "爽度 低" in text and "一句话：普通少年一步步修仙。" in text
@@ -44,6 +47,8 @@ def test_parse_card_derives_genre_filters_vocabulary_and_records_drops() -> None
     odd = parse_card("n2", '{"subgenre": "奇怪", "elements": "系统", "style": "none"}')
     assert odd.genre == "其他" and odd.subgenre == "" and odd.elements == ["系统"] and all(v == "" for v in odd.style.values())
     assert odd.dropped == ["subgenre:奇怪"]
+    bare = parse_card("n3", '{"subgenre": "历史", "elements": ["空间", "星际文明", "刑侦"]}')
+    assert bare.genre == "历史" and bare.subgenre == "" and bare.elements == ["随身空间", "机甲星际", "刑侦推理"] and bare.dropped == ["subgenre_missing:历史"]
 
 
 def test_prompt_carries_the_vocabulary_and_caps_the_digest() -> None:

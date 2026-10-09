@@ -25,9 +25,9 @@ from typing import Any, Callable, Iterable, Mapping
 from src.chat_transport import ChatTransport
 from src.config import DATA_DIR
 from src.llm_json import extract_json_object
-from src.retrieval.card_schema import ELEMENTS, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
+from src.retrieval.card_schema import ELEMENT_ALIASES, ELEMENTS, GENRES, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
 
-CARD_PROMPT_VERSION = "card_v2"
+CARD_PROMPT_VERSION = "card_v2.1"
 DEFAULT_CARDS_PATH = DATA_DIR / "processed" / "book_cards.parquet"
 DEFAULT_CARD_CACHE_PATH = DATA_DIR / "cache" / "book_cards.jsonl"
 LIST_FIELDS = ("elements", "keywords", "dropped")
@@ -115,15 +115,15 @@ def build_card_prompt(profile_text: str, max_chars: int = DEFAULT_CARD_MAX_CHARS
         "只根据给出的文字判断，不要用你对这本书的任何先验知识。\n\n"
         f"{vocabulary_text()}\n\n"
         "填写规则：\n"
-        "- subgenre：从题材二级里选最贴切的一个，原样抄写；都不合适就填空字符串。\n"
+        "- subgenre：从题材二级里选最贴切的一个，原样抄写二级名（不要写括号里的一级）；都不合适就填空字符串。\n"
         "- elements：只列出档案里能看到依据的元素，原样抄写标签名，没有就给空列表；不要自己造标签。\n"
         "- style：五项每项选一档，原样抄写档位。\n"
         "- protagonist / setting：各不超过 30 字。tone：用一个短语描述这本书的气质，不超过 20 字。\n"
         "- one_liner：一句话简介，不超过 60 字，不剧透结局。\n"
-        f"- keywords：最多 {MAX_KEYWORDS} 个类型词，用来补充词表没覆盖的特点（如 反套路、咸鱼）。"
-        "不要写人名、虚构地名、机构名、书名；只有同人文可以写原作名。\n\n"
+        f"- keywords：最多 {MAX_KEYWORDS} 个类型词，只写词表里没有、但读者找书时会用的特点；"
+        "不要重复已选的元素，不要写人名、虚构地名、机构名、书名；只有同人文可以写原作名；没有就给空列表。\n\n"
         "只输出一个 JSON 对象，不要其他文字，格式：\n"
-        '{"subgenre": "...", "elements": ["...", "..."], '
+        '{"subgenre": "二级名", "elements": ["元素名", "元素名"], '
         f"\"style\": {{{style_json}}}, "
         '"protagonist": "...", "setting": "...", "tone": "...", "one_liner": "...", "keywords": ["..."]}\n\n'
         f"【档案】\n{profile_text[:max_chars]}"
@@ -143,19 +143,45 @@ def _strs(value: Any, limit: int, max_len: int = 40) -> list[str]:
     return out[:limit]
 
 
+def normalise_subgenre(raw: str) -> tuple[str, str]:
+    """(subgenre, genre) from what the model wrote: a sub-genre, "一级：二级", "二级（一级）", or just a genre.
+
+    A bare genre keeps the genre and leaves the sub-genre empty rather than losing both,
+    which is what the first v2 run did on 94 of 118 cards.
+    """
+
+    text = raw.strip().strip("（）()")
+    for sep in ("：", ":", "·", "-", "/", "（", "("):
+        if sep in text:
+            left, right = (part.strip(" （）()") for part in text.split(sep, 1))
+            if right in SUBGENRE_TO_GENRE:
+                return right, SUBGENRE_TO_GENRE[right]
+            if left in SUBGENRE_TO_GENRE:
+                return left, SUBGENRE_TO_GENRE[left]
+            text = left if left in GENRES else right
+            break
+    if text in SUBGENRE_TO_GENRE:
+        return text, SUBGENRE_TO_GENRE[text]
+    if text in GENRES:
+        return "", text
+    return "", UNKNOWN_GENRE
+
+
 def parse_card(novel_id: str, text: str, model: str = "") -> BookCard:
     data = extract_json_object(text)
     dropped: list[str] = []
 
-    subgenre = str(data.get("subgenre", "") or "").strip()
-    if subgenre and subgenre not in SUBGENRE_TO_GENRE:
-        dropped.append(f"subgenre:{subgenre}")
-        subgenre = ""
+    raw_subgenre = str(data.get("subgenre", "") or "").strip()
+    subgenre, genre = normalise_subgenre(raw_subgenre)
+    if raw_subgenre and not subgenre:
+        dropped.append(f"subgenre_missing:{raw_subgenre}" if genre != UNKNOWN_GENRE else f"subgenre:{raw_subgenre}")
 
     elements: list[str] = []
     for label in _strs(data.get("elements"), 100):
-        if label in ELEMENTS:
-            elements.append(label)
+        canonical = ELEMENT_ALIASES.get(label, label)
+        if canonical in ELEMENTS:
+            if canonical not in elements:
+                elements.append(canonical)
         else:
             dropped.append(f"element:{label}")
 
@@ -168,9 +194,12 @@ def parse_card(novel_id: str, text: str, model: str = "") -> BookCard:
             value = ""
         style[dim] = value
 
+    taken = set(elements) | {subgenre, genre}
+    keywords = [k for k in _strs(data.get("keywords"), 20, 20) if k not in taken and ELEMENT_ALIASES.get(k, k) not in taken][:MAX_KEYWORDS]
+
     return BookCard(
         novel_id=novel_id,
-        genre=genre_of(subgenre) if subgenre else UNKNOWN_GENRE,
+        genre=genre,
         subgenre=subgenre,
         elements=elements,
         style=style,
@@ -178,7 +207,7 @@ def parse_card(novel_id: str, text: str, model: str = "") -> BookCard:
         setting=str(data.get("setting", "") or "")[:40],
         tone=str(data.get("tone", "") or "")[:30],
         one_liner=str(data.get("one_liner", "") or "")[:80],
-        keywords=_strs(data.get("keywords"), MAX_KEYWORDS, 20),
+        keywords=keywords,
         dropped=dropped,
         model=model,
     )
