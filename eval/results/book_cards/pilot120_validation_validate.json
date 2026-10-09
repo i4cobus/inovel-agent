@@ -1,0 +1,232 @@
+{
+  "玄幻": {
+    "n": 21,
+    "decided": 4,
+    "unclear": 0,
+    "missing": 17,
+    "precision": null,
+    "recall": 0.0,
+    "accuracy": 0.25,
+    "positives": 8
+  },
+  "虐主": {
+    "n": 18,
+    "decided": 10,
+    "unclear": 1,
+    "missing": 7,
+    "precision": null,
+    "recall": 0.0,
+    "accuracy": 0.7,
+    "positives": 3
+  },
+  "圣母": {
+    "n": 31,
+    "decided": 17,
+    "unclear": 1,
+    "missing": 13,
+    "precision": null,
+    "recall": 0.0,
+    "accuracy": 0.941,
+    "positives": 1
+  },
+  "小白": {
+    "n": 31,
+    "decided": 11,
+    "unclear": 0,
+    "missing": 20,
+    "precision": null,
+    "recall": 0.0,
+    "accuracy": 0.909,
+    "positives": 2
+  },
+  "开局无敌": {
+    "n": 13,
+    "decided": 6,
+    "unclear": 0,
+    "missing": 7,
+    "precision": null,
+    "recall": 0.0,
+    "accuracy": 0.5,
+    "positives": 4
+  },
+  "速通": {
+    "n": 7,
+    "decided": 1,
+    "unclear": 0,
+    "missing": 6,
+    "precision": 1.0,
+    "recall": 1.0,
+    "accuracy": 1.0,
+    "positives": 3
+  },
+  "爽文": {
+    "n": 39,
+    "decided": 18,
+    "unclear": 0,
+    "missing": 21,
+    "precision": 0.733,
+    "recall": 0.846,
+    "accuracy": 0.667,
+    "positives": 26
+  },
+  "无脑": {
+    "n": 23,
+    "decided": 12,
+    "unclear": 1,
+    "missing": 10,
+    "precision": null,
+    "recall": null,
+    "accuracy": 1.0,
+    "positives": 0
+  },
+  "独狼": {
+    "n": 14,
+    "decided": 2,
+    "unclear": 2,
+    "missing": 10,
+    "precision": 0.0,
+    "recall": null,
+    "accuracy": 0.5,
+    "positives": 0
+  },
+  "种马": {
+    "n": 15,
+    "decided": 3,
+    "unclear": 0,
+    "missing": 12,
+    "precision": 1.0,
+    "recall": 0.333,
+    "accuracy": 0.333,
+    "positives": 6
+  },
+  "争霸": {
+    "n": 24,
+    "decided": 7,
+    "unclear": 0,
+    "missing": 17,
+    "precision": 0.667,
+    "recall": 1.0,
+    "accuracy": 0.714,
+    "positives": 11
+  },
+  "金手指": {
+    "n": 15,
+    "decided": 6,
+    "unclear": 0,
+    "missing": 9,
+    "precision": 0.333,
+    "recall": 1.0,
+    "accuracy": 0.333,
+    "positives": 6
+  },
+  "搞笑": {
+    "n": 10,
+    "decided": 4,
+    "unclear": 0,
+    "missing": 6,
+    "precision": 0.0,
+    "recall": 0.0,
+    "accuracy": 0.5,
+    "positives": 4
+  },
+  "宠文": {
+    "n": 16,
+    "decided": 6,
+    "unclear": 1,
+    "missing": 9,
+    "precision": 0.333,
+    "recall": 0.5,
+    "accuracy": 0.5,
+    "positives": 6
+  },
+  "恋爱脑": {
+    "n": 20,
+    "decided": 11,
+    "unclear": 2,
+    "missing": 7,
+    "precision": null,
+    "recall": null,
+    "accuracy": 1.0,
+    "positives": 2
+  },
+  "狗血": {
+    "n": 16,
+    "decided": 6,
+    "unclear": 2,
+    "missing": 8,
+    "precision": 0.8,
+    "recall": 0.8,
+    "accuracy": 0.667,
+    "positives": 10
+  },
+  "言情": {
+    "n": 9,
+    "decided": 2,
+    "unclear": 1,
+    "missing": 6,
+    "precision": null,
+    "recall": null,
+    "accuracy": 1.0,
+    "positives": 2
+  },
+  "开挂": {
+    "n": 13,
+    "decided": 7,
+    "unclear": 1,
+    "missing": 5,
+    "precision": 0.833,
+    "recall": 0.833,
+    "accuracy": 0.714,
+    "positives": 10
+  },
+  "压抑": {
+    "n": 13,
+    "decided": 10,
+    "unclear": 1,
+    "missing": 2,
+    "precision": null,
+    "recall": 0.0,
+    "accuracy": 0.6,
+    "positives": 4
+  },
+  "魔改": {
+    "n": 17,
+    "decided": 11,
+    "unclear": 0,
+    "missing": 6,
+    "precision": 0.75,
+    "recall": 0.75,
+    "accuracy": 0.636,
+    "positives": 11
+  },
+  "灵异": {
+    "n": 14,
+    "decided": 7,
+    "unclear": 0,
+    "missing": 7,
+    "precision": 0.5,
+    "recall": 0.5,
+    "accuracy": 0.429,
+    "positives": 8
+  },
+  "超能力": {
+    "n": 16,
+    "decided": 3,
+    "unclear": 1,
+    "missing": 12,
+    "precision": 0.0,
+    "recall": null,
+    "accuracy": 0.667,
+    "positives": 6
+  },
+  "后宫": {
+    "n": 12,
+    "decided": 2,
+    "unclear": 2,
+    "missing": 8,
+    "precision": 0.0,
+    "recall": null,
+    "accuracy": 0.5,
+    "positives": 1
+  }
+}
