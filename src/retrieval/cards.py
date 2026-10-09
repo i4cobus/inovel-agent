@@ -27,9 +27,9 @@ from src.chat_transport import ChatTransport
 from src.config import DATA_DIR
 from src.digest import DIGEST_VERSION
 from src.llm_json import extract_json_object
-from src.retrieval.card_schema import ELEMENT_ALIASES, ELEMENT_EVIDENCE_NAMES, ELEMENT_QUOTE_SIGNATURES, ELEMENTS, GENRES, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_ALIASES, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
+from src.retrieval.card_schema import ELEMENT_ALIASES, ELEMENT_EVIDENCE_NAMES, ELEMENT_QUOTE_SIGNATURES, ELEMENT_TO_STYLE, ELEMENTS, GENRES, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_ALIASES, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
 
-CARD_PROMPT_VERSION = "card_v3.1"
+CARD_PROMPT_VERSION = "card_v3.2"
 DEFAULT_CARDS_PATH = DATA_DIR / "processed" / "book_cards.parquet"
 DEFAULT_CARD_CACHE_PATH = DATA_DIR / "cache" / "book_cards.jsonl"
 LIST_FIELDS = ("elements", "elements_unverified", "keywords", "dropped")
@@ -272,6 +272,10 @@ def parse_card(novel_id: str, text: str, model: str = "", source_text: str | Non
         if label in STYLE_OPTIONS:
             # The 9B model sometimes files the style scales under elements; route them home.
             style_in_elements[label] = quote
+            continue
+        if label in ELEMENT_TO_STYLE:
+            dim, option = ELEMENT_TO_STYLE[label]
+            style_in_elements.setdefault(dim, option)
             continue
         canonical = ELEMENT_ALIASES.get(label, label)
         if canonical not in ELEMENTS:

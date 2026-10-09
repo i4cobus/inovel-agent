@@ -121,10 +121,9 @@ ELEMENT_GROUPS: dict[str, dict[str, str]] = {
         "鬼怪灵异": "鬼、灵体、诅咒、凶宅等超自然恐怖",
         "同人": "以已有作品为底本（关键词里写原作名）",
     },
-    "感情": {
-        "后宫": "两名以上异性与主角并存的、被叙事认可的感情或伴侣关系",
-    },
 }
+# 后宫 was an element until v3.1. A harem is a whole-book judgment like 爽度, not a device one line can
+# prove, so it lives in the 感情线 style scale together with how much the romance weighs (v3.2, 2026-10-10).
 ELEMENTS: dict[str, str] = {label: definition for group in ELEMENT_GROUPS.values() for label, definition in group.items()}
 
 # 摘录里必须出现的特征词（记 element_weak_quote）。v3 试点上量过：对 系统 / 修仙 / 穿越 / 重生 开门槛拦下 37 条，
@@ -135,9 +134,10 @@ ELEMENT_QUOTE_SIGNATURES: dict[str, tuple[str, ...]] = {}
 # Elements whose evidence is a list of names rather than a quote. A harem is spread over many scenes
 # (six girls in six chapters), no 20-character sentence proves it, and Flash copied the definition
 # instead on 10 of 116 pilot cards; two names that both occur in the digest are checkable evidence.
-ELEMENT_EVIDENCE_NAMES: dict[str, str] = {
-    "后宫": "依据不写摘录，写两位以上与主角有感情或伴侣关系的异性名字，用、分隔，名字必须在档案里出现过",
-}
+ELEMENT_EVIDENCE_NAMES: dict[str, str] = {}  # 后宫 used this in v3.1; it moved to the 感情线 scale in v3.2
+
+# 模型把这些当元素写时，转成风格档位（元素层已没有后宫）。
+ELEMENT_TO_STYLE: dict[str, tuple[str, str]] = {"后宫": ("感情线", "多女主"), "多女主": ("感情线", "多女主"), "无感情线": ("感情线", "无"), "无女主": ("感情线", "无")}
 
 # 模型常写的近义词 / 二级题材名 -> 词表里的元素。
 ELEMENT_ALIASES: dict[str, str] = {
@@ -157,7 +157,6 @@ ELEMENT_ALIASES: dict[str, str] = {
     "网游": "游戏", "电竞": "游戏", "虚拟网游": "游戏",
     "娱乐明星": "娱乐圈", "文娱": "娱乐圈", "明星": "娱乐圈",
     "校园": "学院", "青春校园": "学院",
-    "多女主": "后宫",
     "鉴宝": "玄学鉴宝", "风水": "玄学鉴宝", "玄学": "玄学鉴宝", "相术": "玄学鉴宝",
     "宫斗": "权谋", "朝堂": "权谋", "权谋争斗": "权谋", "官场": "权谋",
     "报仇": "复仇", "复仇打脸": "复仇", "扮猪吃老虎": "扮猪吃虎", "隐藏实力": "扮猪吃虎",
@@ -174,7 +173,7 @@ STYLE_DIMENSIONS: dict[str, tuple[tuple[str, ...], str]] = {
     "主角结构": (("单一男主", "单一女主", "群像"), "群像：多视角、多主角，没有单一绝对主角"),
     "爽度": (("高", "中", "低"), "高：冲突迅速解决、主角连续占上风、反复打脸；低：长期受挫、代价沉重"),
     "基调": (("轻松搞笑", "热血", "沉重压抑", "温馨日常", "悬疑惊悚"), "取最主要的一种"),
-    "感情线比重": (("无", "辅线", "主线"), "主线：情节围绕两人关系推进"),
+    "感情线": (("无", "单女主辅线", "单女主主线", "多女主"), "多女主：两名以上异性与主角并存、被叙事认可的感情关系，不论分量；主线：情节围绕感情推进；没有感情线或可忽略选无"),
     "主角起点": (("开局无敌", "普通", "废柴逆袭"), "开篇主角实力相对周围人的位置"),
 }
 STYLE_OPTIONS: dict[str, tuple[str, ...]] = {dim: options for dim, (options, _) in STYLE_DIMENSIONS.items()}
