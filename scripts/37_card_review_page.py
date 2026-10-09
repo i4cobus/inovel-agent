@@ -234,6 +234,13 @@ function select(id) { selected = id; try { localStorage.setItem('cardReview.sele
   for (const it of document.querySelectorAll('.item')) it.classList.toggle('on', it.dataset.id === id); renderCard(); }
 function step(d) { const rows = filtered(); const i = rows.findIndex(c => c.id === selected); const n = rows[i + d]; if (n) { select(n.id); document.querySelector(`.item[data-id="${n.id}"]`)?.scrollIntoView({block:'nearest'}); } }
 
+const DROP_KINDS = {element:'词表外的元素（已丢弃）', element_unsupported:'摘录在档案里找不到（元素已丢弃）', element_definition:'摘录抄的是词表定义，不是原文（元素已丢弃）', element_weak_quote:'摘录没体现元素特征（元素已丢弃）', subgenre:'词表外的二级（已丢弃）', subgenre_missing:'只写了一级', subgenre_evidence_unsupported:'二级的摘录在档案里找不到', style:'档位不在词表（已清空）'};
+function droppedRows(dropped) {
+  if (!dropped || !dropped.length) return '';
+  const groups = {};
+  for (const d of dropped) { const i = d.indexOf(':'); const kind = i < 0 ? d : d.slice(0, i); (groups[kind] ||= []).push(i < 0 ? '' : d.slice(i + 1)); }
+  return Object.entries(groups).map(([kind, items]) => `<dt>${esc(DROP_KINDS[kind] ? '核对' : kind)}</dt><dd class="hint">${esc(DROP_KINDS[kind] || kind)}：${items.map(x => { const [label, quote] = x.split(/=(.*)/s); return quote ? `<b>${esc(label)}</b>“${esc(quote)}”` : `<b>${esc(label || kind)}</b>`; }).join('、')}</dd>`).join('');
+}
 const FIELDS = [['subgenre','题材二级'],['one_liner','一句话'],['protagonist','主角'],['setting','背景'],['tone','气质'],['keywords','关键词']];
 function renderCard() {
   const b = BOOKS.find(x => x.id === selected); const c = b && cardOf(b); const el = $('#card'), dg = $('#digest');
@@ -250,7 +257,7 @@ function renderCard() {
     <div class="chips"><span class="chip g">${esc(c.genre)}${c.subgenre?' · '+esc(c.subgenre):''}</span>${Object.entries(c.style).filter(([,x])=>x).map(([d,x])=>`<span class="chip">${esc(d)}·${esc(x)}</span>`).join('')}</div>
     <p class="one">${esc(c.one_liner)}</p>
     ${(c.evidence||{}).subgenre ? `<div class="hint">二级依据：“${esc(c.evidence.subgenre)}”</div>` : ''}
-    <dl class="kv"><dt>主角</dt><dd>${esc(c.protagonist)}</dd><dt>背景</dt><dd>${esc(c.setting)}</dd><dt>气质</dt><dd>${esc(c.tone)}</dd><dt>关键词</dt><dd><div class="chips">${c.keywords.map(k=>`<span class="chip">${esc(k)}</span>`).join('')||'<span class="hint">无</span>'}</div></dd>${c.dropped.length?`<dt>词表外</dt><dd class="hint">${c.dropped.map(esc).join('、')}（模型想说但词表没有，已丢弃）</dd>`:''}</dl>
+    <dl class="kv"><dt>主角</dt><dd>${esc(c.protagonist)}</dd><dt>背景</dt><dd>${esc(c.setting)}</dd><dt>气质</dt><dd>${esc(c.tone)}</dd><dt>关键词</dt><dd><div class="chips">${c.keywords.map(k=>`<span class="chip">${esc(k)}</span>`).join('')||'<span class="hint">无</span>'}</div></dd>${droppedRows(c.dropped)}</dl>
     <div><h4>元素（${c.elements.length}）· 点一下 ✓ 对，再点 ✗ 错，再点清除</h4><div class="chips">${c.elements.map(chip).join('')||'<span class="hint">无</span>'}</div></div>
     ${cmp}
     <div class="review">
