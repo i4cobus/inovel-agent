@@ -234,7 +234,7 @@ def build_check_trope(judge: TropeJudge) -> ToolSpec:
 
     return ToolSpec(
         name="check_trope",
-        description="判断一本书是否属于某个题材或风格标签（后宫、种马、爽文、圣母、无脑等）。从全书采样证据后由模型判断，结论是 yes、no 或 unclear，附引文。",
+        description="判断一本书是否属于某个题材或风格标签（后宫、种马、爽文、圣母、无脑等）。先查离线书卡（source=card，题材 / 元素 / 风格五维能直接回答的），书卡没说的再从全书采样证据由模型判断（source=text，附引文）。结论是 yes、no 或 unclear。",
         parameters={
             "type": "object",
             "properties": {

@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from src.chat_transport import ChatTransport
 from src.config import DATA_DIR
@@ -60,6 +60,74 @@ TROPE_GLOSSARY: dict[str, str] = {
     "无脑": "冲突解决不依赖策略或信息，靠实力碾压或对手犯低级错误",
     "小白": "文字直白、人物扁平、情节套路化，解释性叙述多于描写",
 }
+
+
+# ---------------------------------------------------------------- the card first (2026-10-10)
+#
+# A book card (src/retrieval/cards.py) already states the genre, three to four elements and five style
+# scales, read by a model from twelve whole chapters. Where the card speaks to a trope, its answer is
+# cheaper and better founded than a fresh reading of six 700-character windows, so check_trope consults
+# it first and reads the text only when the card is silent. Two asymmetries are deliberate:
+#   * a style scale or the genre is single-valued, so a *different* value is evidence of "no";
+#   * the element list is sparse (about three per book), so a *missing* element is not evidence of
+#     anything and the text is read instead.
+CARD_STYLE_RULES: dict[str, tuple[str, tuple[str, ...]]] = {  # trope -> (scale, values that mean yes)
+    "后宫": ("感情线", ("多女主",)),
+    "压抑": ("基调", ("沉重压抑",)),
+    "搞笑": ("基调", ("轻松搞笑",)),
+    "开局无敌": ("主角起点", ("开局无敌",)),
+    "言情": ("感情线", ("单女主主线",)),
+}
+CARD_GENRE_RULES: dict[str, tuple[str, ...]] = {"玄幻": ("玄幻",), "言情": ("言情",)}  # trope -> genres that mean yes
+CARD_ELEMENT_RULES: dict[str, tuple[str, ...]] = {  # trope -> elements any of which means yes
+    "金手指": ("系统", "随身空间", "重生"),
+    "灵异": ("鬼怪灵异",),
+    "超能力": ("异能",),
+    "克苏鲁": ("克苏鲁诡异",),
+    "争霸": ("争霸建国",),
+}
+CARD_SUBGENRE_RULES: dict[str, tuple[str, ...]] = {"灵异": ("灵异民俗",), "超能力": ("都市异能",)}
+# 爽度 is three-valued with a wide middle: only the extremes decide.
+CARD_SCALE_EXTREMES: dict[str, tuple[str, str, str]] = {"爽文": ("爽度", "高", "低")}  # trope -> (scale, yes value, no value)
+
+
+def card_verdict(card: Any, trope: str) -> dict[str, Any] | None:
+    """What the book card says about a trope, as a check_trope result, or None when it is silent."""
+
+    if card is None:
+        return None
+    style = getattr(card, "style", {}) or {}
+    elements = set(getattr(card, "elements", []) or [])
+    genre = getattr(card, "genre", "") or ""
+    subgenre = getattr(card, "subgenre", "") or ""
+
+    def answer(verdict: str, confidence: str, basis: str) -> dict[str, Any]:
+        return {"verdict": verdict, "quotes": [], "confidence": confidence, "reason": f"书卡：{basis}", "source": "card"}
+
+    if trope in CARD_ELEMENT_RULES and elements & set(CARD_ELEMENT_RULES[trope]):
+        return answer("yes", "high", "元素 " + "、".join(sorted(elements & set(CARD_ELEMENT_RULES[trope]))))
+    if trope in CARD_SUBGENRE_RULES and subgenre in CARD_SUBGENRE_RULES[trope]:
+        return answer("yes", "high", f"题材 {genre}·{subgenre}")
+    if trope in CARD_GENRE_RULES:
+        if genre in CARD_GENRE_RULES[trope]:
+            return answer("yes", "high", f"题材 {genre}")
+        if genre and genre != "其他" and trope not in CARD_STYLE_RULES:
+            return answer("no", "medium", f"题材 {genre}")
+    if trope in CARD_STYLE_RULES:
+        scale, yes_values = CARD_STYLE_RULES[trope]
+        value = style.get(scale, "")
+        if value in yes_values:
+            return answer("yes", "high", f"{scale} {value}")
+        if value:
+            return answer("no", "medium", f"{scale} {value}")
+    if trope in CARD_SCALE_EXTREMES:
+        scale, yes_value, no_value = CARD_SCALE_EXTREMES[trope]
+        value = style.get(scale, "")
+        if value == yes_value:
+            return answer("yes", "high", f"{scale} {value}")
+        if value == no_value:
+            return answer("no", "medium", f"{scale} {value}")
+    return None
 
 
 @dataclass(frozen=True)
@@ -123,7 +191,9 @@ class CachedTropeJudge:
         windows: int = 6,
         window_chars: int = 700,
         max_tokens: int = 400,
+        cards: Mapping[str, Any] | None = None,
     ) -> None:
+        self.cards = cards or {}
         self.transport = transport
         self.raw_text_lookup = raw_text_lookup
         self.model_name = model_name
@@ -156,10 +226,13 @@ class CachedTropeJudge:
         definition = self.glossary.get(trope)
         if definition is None:
             return {"novel_id": novel_id, "trope": trope, "verdict": "unknown_trope", "known_tropes": sorted(self.glossary)}
+        from_card = card_verdict(self.cards.get(novel_id), trope)
+        if from_card is not None:
+            return {"novel_id": novel_id, "trope": trope, **from_card}
         key = trope_cache_key(novel_id, trope, self.model_name)
         cached = self._cache.get(key)
         if cached is not None:
-            return {"novel_id": novel_id, "trope": trope, **cached, "cached": True}
+            return {"novel_id": novel_id, "trope": trope, **cached, "cached": True, "source": "text"}
         text = self.raw_text_lookup(novel_id)
         if not text:
             raise ToolError(f"没有这本书的原文：{novel_id}")
@@ -174,4 +247,4 @@ class CachedTropeJudge:
             return {"novel_id": novel_id, "trope": trope, "verdict": "unclear", "quotes": [], "confidence": "low", "reason": "判定输出无法解析"}
         self._cache[key] = verdict
         self._append_cache(key, verdict)
-        return {"novel_id": novel_id, "trope": trope, **verdict, "cached": False}
+        return {"novel_id": novel_id, "trope": trope, **verdict, "cached": False, "source": "text"}

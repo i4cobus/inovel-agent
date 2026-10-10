@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Mapping, Any, Callable
 
 from src.agent.context import ContextBudget
 from src.agent.loop import AgentConfig, AgentLoop
@@ -50,7 +50,7 @@ class ParquetProfiles:
         self.cards = cards
 
     @classmethod
-    def load(cls, path: Path = DEFAULT_PROFILES_PATH, cards_path: Path | None = None, keep_chars: int = 3000) -> "ParquetProfiles":
+    def load(cls, path: Path = DEFAULT_PROFILES_PATH, cards_path: Path | None = None, keep_chars: int = 3000, cards: Mapping[str, Any] | None = None) -> "ParquetProfiles":
         import json
 
         import pyarrow.parquet as pq
@@ -61,11 +61,11 @@ class ParquetProfiles:
         # keep the peak at one batch of texts rather than the whole column.
         wanted = ("novel_id", "title_guess", "sections_json", "digest_version") if "sections_json" in names else ("novel_id", "title_guess", "profile_text")
         columns = [c for c in wanted if c in names]
-        card_texts: dict[str, str] = {}
-        if cards_path is not None and cards_path.exists():
+        if cards is None and cards_path is not None and cards_path.exists():
             from src.retrieval.cards import load_cards
 
-            card_texts = {novel_id: card.text() for novel_id, card in load_cards(cards_path).items()}
+            cards = load_cards(cards_path)
+        card_texts = {novel_id: card.text() for novel_id, card in (cards or {}).items()}
         rows: dict[str, dict[str, str]] = {}
         versions: set[str] = set()
         for batch in pq.ParquetFile(path).iter_batches(batch_size=256, columns=columns):
@@ -195,12 +195,17 @@ def build_agent(
     embedder = factory(metadata["model_name"], device=device, dtype=embedding_dtype or metadata.get("dtype", "fp32"))
     searcher = load_searchers(index_dir, embedder)[0]  # the dense searcher; BM25/hybrid are not search_books
 
-    profiles = ParquetProfiles.load(profiles_path, cards_path=cards_path)
+    cards = {}
+    if cards_path is not None and cards_path.exists():
+        from src.retrieval.cards import load_cards
+
+        cards = load_cards(cards_path)
+    profiles = ParquetProfiles.load(profiles_path, cards=cards)
     densities = load_density_table(density_path)
     memory = UserMemory.load(memory_path)
     transport = HTTPChatTransport(model=model, base_url=base_url, reasoning_effort=reasoning_effort)
     trope_transport = HTTPChatTransport(model=trope_model or model, base_url=base_url, reasoning_effort=reasoning_effort)
-    judge = CachedTropeJudge(trope_transport, LazyRawText(inventory_path), model_name=trope_model or model)
+    judge = CachedTropeJudge(trope_transport, LazyRawText(inventory_path), model_name=trope_model or model, cards=cards)
 
     bundle = AgentBundle(loop=None, tools=ToolRegistry(), memory=memory, memory_path=memory_path)  # type: ignore[arg-type]
     bundle.tools.register(build_search_books(searcher, budget, profiles))
