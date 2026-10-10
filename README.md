@@ -33,7 +33,7 @@ digest 是书卡和索引共同的输入，版本号写进卡的缓存键和索�
 
 词表参考起点、纵横的分类体系逐条审定，不照搬、不自造；二级边界有说明行，旧名有别名表。
 模型给词表外的词一律丢弃并记录原因。设计经过 v1 → v3.2 多轮，过程见 `docs/card-schema-v3.md`、`docs/book-cards-pilot.md`。
-卡用在三处：作为索引里的一个段参与检索；`get_profile` 先给卡再给简介和开头；之后 `check_trope` 先查卡再读原文。
+卡用在三处：作为索引里的一个段参与检索；`get_profile` 先给卡再给简介和开头；`check_trope` 先查卡（题材、元素、风格五维能直接回答的标签），卡没说的再采样原文让模型判。
 
 ### 索引（`src/retrieval/multivector.py`、`pooling.py`、`hybrid.py`、`bm25.py`）
 

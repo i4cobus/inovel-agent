@@ -30,7 +30,8 @@ verbatim quote that the parser checks against the digest, unverified ones are ke
 and five style scales (protagonist structure, 爽度, tone, romance line, starting point).
 The vocabulary was audited line by line against the Qidian/Zongheng taxonomies rather than
 copied; anything outside it is dropped and the reason recorded. Cards feed the index as one
-section, `get_profile` (card first, then synopsis and opening), and later `check_trope`.
+section, `get_profile` (card first, then synopsis and opening) and `check_trope` (the card answers
+what its genre, elements and style scales can; the text is sampled only when the card is silent).
 
 **Index** (`src/retrieval/multivector.py`, `pooling.py`, `hybrid.py`, `bm25.py`): one
 vector per chunk, a book scores as its best chunk; the single-vector index averages a
