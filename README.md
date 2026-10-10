@@ -75,6 +75,7 @@ uv run pytest                                            # CPU，无模型下载
 uv run python scripts/02_build_digests.py                # digest
 uv run python scripts/32_build_book_cards.py --model qwen3.8-flash --base-url <OpenAI 兼容地址> --no-thinking
 uv run python scripts/30_build_book_indexes.py --dense multi --cards data/processed/book_cards_flash.parquet --dtype bf16 --batch-size 8
+#   书卡还没建好时：先不带 --cards 建，之后 scripts/30b_append_card_sections.py --index-dir <目录> 只嵌入书卡段并追加（平铺内积索引，结果与一起建相同）
 uv run python scripts/33_pool_single_from_multi.py --kind-mean
 uv run python scripts/chat.py                            # 需要本地 Ollama
 ```

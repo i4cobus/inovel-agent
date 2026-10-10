@@ -168,6 +168,35 @@ def build_section_table(
     return texts, records
 
 
+def card_section_table(
+    records: list[SectionRecord],
+    card_texts: dict[str, str],
+    titles: dict[str, str],
+    chunk_chars: int | None = DEFAULT_CHUNK_CHARS,
+) -> tuple[list[str], list[SectionRecord]]:
+    """Card sections for the books of an existing multi-vector index, numbered exactly as
+    ``build_section_table`` would have numbered them had the cards been there at build time: the card
+    is a book's last section, so its pieces continue that book's ordinals. Lets the long chunk build run
+    before the cards exist (2026-10-11) and the cards be appended afterwards; a flat inner-product index
+    does not care about row order, so the appended index answers like a joint build would."""
+
+    next_ordinal: dict[str, int] = {}
+    for record in records:
+        next_ordinal[record.novel_id] = max(next_ordinal.get(record.novel_id, 0), record.ordinal + 1)
+    texts: list[str] = []
+    out: list[SectionRecord] = []
+    for novel_id, start in next_ordinal.items():
+        card = card_texts.get(novel_id)
+        if not card:
+            continue
+        section = Section("card", f"标题：{titles.get(novel_id, '')}\n{card}")
+        pieces = chunk_section(section, chunk_chars) if chunk_chars else [section]
+        for offset, piece in enumerate(pieces):
+            texts.append(piece.text)
+            out.append(SectionRecord(novel_id=novel_id, kind="card", ordinal=start + offset))
+    return texts, out
+
+
 def section_stats(records: list[SectionRecord]) -> dict[str, float]:
     """How many sections each book got. A multi-vector build over profiles that
     split into one section each is a single-vector build in disguise, which is
@@ -261,6 +290,34 @@ class MultiVectorIndex:
         for rank, item in enumerate(ranked, start=1):
             item["rank"] = rank
         return ranked
+
+    def kinds(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for record in self.records:
+            counts[record.kind] = counts.get(record.kind, 0) + 1
+        return counts
+
+    def append(self, embeddings: np.ndarray, records: list[SectionRecord]) -> None:
+        """Add vectors (and their records) to the index in place."""
+
+        vectors = validate_embeddings(embeddings)
+        if vectors.shape[1] != self.index.d:
+            raise ValueError(f"Vector dim {vectors.shape[1]} does not match index dim {self.index.d}")
+        if vectors.shape[0] != len(records):
+            raise ValueError(f"{vectors.shape[0]} vectors for {len(records)} records")
+        self.index.add(vectors)
+        self.records.extend(records)
+
+    def without_kind(self, kind: str) -> "MultiVectorIndex":
+        """A copy of this index with every section of ``kind`` dropped (rebuilds the flat index)."""
+
+        keep = [row for row, record in enumerate(self.records) if record.kind != kind]
+        if len(keep) == len(self.records):
+            return self
+        if not keep:
+            raise ValueError(f"dropping kind {kind!r} would empty the index")
+        vectors = np.ascontiguousarray(self.index.reconstruct_n(0, self.index.ntotal), dtype=np.float32)
+        return MultiVectorIndex(build_faiss_index(vectors[keep]), [self.records[row] for row in keep], self.meta)
 
     def save(self, directory: Path, metadata: dict[str, Any] | None = None) -> None:
         directory.mkdir(parents=True, exist_ok=True)
