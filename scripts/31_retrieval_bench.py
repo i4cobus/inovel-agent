@@ -53,6 +53,8 @@ def main(
         result = evaluate(searcher, queries, depth=depth, recall_k=recall_k)
         results.append(result)
         console.print(f"{result.name}: {result.metrics()}")
+        if result.kind_report():
+            console.print(f"  section kinds: {result.kind_report()}")
 
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("a", encoding="utf-8") as handle:
@@ -66,6 +68,7 @@ def main(
                 "recall_k": recall_k,
                 "at": datetime.now(timezone.utc).isoformat(),
                 **result.metrics(),
+                **result.kind_report(),
             }
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     console.print(format_table(results))

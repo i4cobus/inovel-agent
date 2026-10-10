@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import json
 import statistics
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -23,7 +24,17 @@ from src.retrieval.query import retrieval_query
 
 DEFAULT_QUERIES_PATH = PROJECT_ROOT / "eval" / "eval_queries.jsonl"
 DEFAULT_RESULTS_DIR = PROJECT_ROOT / "eval" / "results"
-STRONG_LABEL = "2"
+STRONG_LABEL = 2  # the v1 judge's scale: 0 irrelevant, 1 partly, 2 strongly relevant
+
+
+def is_strong(label: str | None) -> bool:
+    """The judged CSVs write the label as "2" in some runs and "2.0" in others (pandas round-trips);
+    until 2026-10-10 only the "2" files counted, which silently dropped the six arm files."""
+
+    try:
+        return float(label or "") == STRONG_LABEL
+    except ValueError:
+        return False
 
 
 @dataclass
@@ -46,16 +57,23 @@ def load_benchmark(queries_path: Path = DEFAULT_QUERIES_PATH, results_dir: Path 
     for csv_path in sorted(results_dir.rglob("eval_results_judged*.csv")):
         with csv_path.open(encoding="utf-8-sig", newline="") as handle:
             for row in csv.DictReader(handle):
-                if row.get("judge_relevance_label") == STRONG_LABEL and row["query_id"] in queries:
+                if is_strong(row.get("judge_relevance_label")) and row["query_id"] in queries:
                     queries[row["query_id"]].strong.add(row["novel_id"])
     return list(queries.values())
 
 
-def anchor_rank(rows: Iterable[dict[str, Any]], anchor: str) -> int | None:
+def anchor_hit(rows: Iterable[dict[str, Any]], anchor: str) -> tuple[int, dict[str, Any]] | None:
+    """(rank, row) of the first row whose title matches the anchor, or None."""
+
     for position, row in enumerate(rows, start=1):
         if title_matches_anchor(str(row.get("title_guess", "")), anchor):
-            return int(row.get("rank") or position)
+            return int(row.get("rank") or position), row
     return None
+
+
+def anchor_rank(rows: Iterable[dict[str, Any]], anchor: str) -> int | None:
+    hit = anchor_hit(rows, anchor)
+    return hit[0] if hit else None
 
 
 @dataclass
@@ -66,6 +84,18 @@ class BenchResult:
     recall_at_k: dict[str, float]
     recall_k: int
     strip_negatives: bool = True
+    # Section-kind attribution (multi-vector indexes only: their rows carry ``section_kind``).
+    # Which kind of section produced the hit: for anchors found within depth, for strong pairs found
+    # within recall_k, and for every row in the top recall_k. Tells whether the card section earns its
+    # place and whether chapter chunks help or crowd out the synopsis (2026-10-10).
+    anchor_kinds: Counter = field(default_factory=Counter)
+    strong_kinds: Counter = field(default_factory=Counter)
+    top_kinds: Counter = field(default_factory=Counter)
+
+    def kind_report(self) -> dict[str, dict[str, int]]:
+        if not self.top_kinds:
+            return {}
+        return {"anchor_hits_by_kind": dict(self.anchor_kinds), "strong_hits_by_kind": dict(self.strong_kinds), f"top{self.recall_k}_rows_by_kind": dict(self.top_kinds)}
 
     def metrics(self) -> dict[str, Any]:
         ranks = list(self.anchor_ranks.values())
@@ -101,13 +131,24 @@ def evaluate(searcher: Any, queries: list[BenchQuery], depth: int = 1000, recall
 
     anchor_ranks: dict[str, int | None] = {}
     recall: dict[str, float] = {}
+    anchor_kinds: Counter = Counter()
+    strong_kinds: Counter = Counter()
+    top_kinds: Counter = Counter()
     for query in queries:
         if not query.anchors and not query.strong:
             continue
         text = retrieval_query(query.query) if strip_negatives else query.query
         rows = searcher.search(text, depth)
         for anchor in query.anchors:
-            anchor_ranks[f"{query.query_id}|{anchor}"] = anchor_rank(rows, anchor)
+            hit = anchor_hit(rows, anchor)
+            anchor_ranks[f"{query.query_id}|{anchor}"] = hit[0] if hit else None
+            if hit and hit[1].get("section_kind"):
+                anchor_kinds[str(hit[1]["section_kind"])] += 1
+        for row in rows[:recall_k]:
+            if row.get("section_kind"):
+                top_kinds[str(row["section_kind"])] += 1
+                if str(row["novel_id"]) in query.strong:
+                    strong_kinds[str(row["section_kind"])] += 1
         if query.strong:
             top = {str(row["novel_id"]) for row in rows[:recall_k]}
             recall[query.query_id] = len(top & query.strong) / len(query.strong)
@@ -118,6 +159,9 @@ def evaluate(searcher: Any, queries: list[BenchQuery], depth: int = 1000, recall
         recall_at_k=recall,
         recall_k=recall_k,
         strip_negatives=strip_negatives,
+        anchor_kinds=anchor_kinds,
+        strong_kinds=strong_kinds,
+        top_kinds=top_kinds,
     )
 
 

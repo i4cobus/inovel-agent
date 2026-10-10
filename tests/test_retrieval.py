@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from src.profile import make_profile_text
-from src.retrieval.bench import BenchQuery, anchor_rank, evaluate, format_table, load_benchmark
+from src.retrieval.bench import BenchQuery, anchor_rank, evaluate, format_table, is_strong, load_benchmark
 from src.retrieval.bm25 import BM25Index, tokenize
 from src.retrieval.hybrid import BM25Searcher, HybridSearcher, MultiVectorSearcher, reciprocal_rank_fusion
 from src.retrieval.multivector import MultiVectorIndex, build_section_table, make_book_meta, section_stats, split_profile_sections
@@ -146,7 +146,7 @@ def test_benchmark_loads_the_committed_evaluation_artifacts() -> None:
     assert sum(len(q.anchors) for q in queries) == 55
     assert sum(1 for q in queries if q.anchors) == 31
     assert sum(1 for q in queries if q.strong) == 56
-    assert sum(len(q.strong) for q in queries) == 627
+    assert sum(len(q.strong) for q in queries) == 792  # 627 until 2026-10-10, when the "2.0" arm files started to count
 
 
 class FixedSearcher:
@@ -179,6 +179,27 @@ def test_evaluate_reads_anchor_ranks_and_recall_from_one_ranking() -> None:
     table = format_table([result])
     assert table.startswith("| config | anchors |") and "| fixed |" in table
     assert anchor_rank([], "x") is None
+    assert result.kind_report() == {}  # single-vector rows carry no section kind
+
+
+def test_evaluate_attributes_hits_to_section_kinds() -> None:
+    queries = [BenchQuery("q1", "仙侠", anchors=["凡人修仙传"], strong={"a", "b"})]
+    rows = {
+        "仙侠": [
+            {"rank": 1, "novel_id": "a", "title_guess": "《凡人修仙传》", "section_kind": "card"},
+            {"rank": 2, "novel_id": "b", "title_guess": "《别的》", "section_kind": "middle"},
+            {"rank": 3, "novel_id": "c", "title_guess": "《无关》", "section_kind": "middle"},
+        ]
+    }
+    result = evaluate(FixedSearcher(rows), queries, depth=50, recall_k=20)
+    report = result.kind_report()
+    assert report["anchor_hits_by_kind"] == {"card": 1}
+    assert report["strong_hits_by_kind"] == {"card": 1, "middle": 1}
+    assert report["top20_rows_by_kind"] == {"card": 1, "middle": 2}
+
+
+def test_strong_label_accepts_both_csv_spellings() -> None:
+    assert is_strong("2") and is_strong("2.0") and not is_strong("1.0") and not is_strong("") and not is_strong(None)
 
 
 def test_section_stats_flag_a_single_section_table() -> None:
