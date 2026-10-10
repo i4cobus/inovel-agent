@@ -16,11 +16,16 @@ import numpy as np
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 
-DEFAULT_EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-8B"
+# 2026-10-10: the 4B model replaces 0.6B for the rebuilt chunked index (C-MTEB retrieval 77.0 vs 71.0).
+# 8B was ruled out: its bf16 weights alone are 15.1 GB against the 4080's usable 14.4 GiB.
+DEFAULT_EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-4B"
 
-# Tuned for A100-80GB. The previous value of 32 was an RTX 4080 (16 GB) constraint:
-# a 4B encoder in fp16 left only ~8 GB for activations. Lower this for smaller cards.
-DEFAULT_BATCH_SIZE = 256
+# For the RTX 4080 (16 GB) with the 4B model in bf16 (8 GB of weights) and chunks of at most
+# ~1,200 tokens; encode_documents_with_backoff halves it on OOM. The v1 pipeline used 256 on an A100.
+DEFAULT_BATCH_SIZE = 32
+# Chunks are <= 1,500 characters and cards a few hundred; capping the sequence bounds activation
+# memory per batch without truncating anything we index.
+DEFAULT_MAX_SEQ_LENGTH = 2048
 
 # Qwen3-Embedding is instruction-aware: queries carry a task instruction prefix and
 # documents do not. sentence-transformers exposes this as encode_query/encode_document,
@@ -47,11 +52,13 @@ def load_embedding_model(
     model_name: str = DEFAULT_EMBEDDING_MODEL,
     device: str | None = None,
     dtype: str = "fp32",
+    max_seq_length: int | None = None,
 ) -> SentenceTransformer:
     """Load a SentenceTransformer embedding model once per process.
 
     ``dtype`` matters on a 16 GB card: Qwen3-Embedding-4B is 16 GB in fp32 and
     8 GB in bf16, and sentence-transformers loads fp32 unless told otherwise.
+    ``max_seq_length`` caps the tokens per text (the model allows 32k).
     """
 
     from sentence_transformers import SentenceTransformer
@@ -65,7 +72,10 @@ def load_embedding_model(
         import torch
 
         kwargs["model_kwargs"] = {"torch_dtype": torch.bfloat16 if dtype == "bf16" else torch.float16}
-    return SentenceTransformer(model_name, **kwargs)
+    model = SentenceTransformer(model_name, **kwargs)
+    if max_seq_length is not None:
+        model.max_seq_length = max_seq_length
+    return model
 
 
 def open_encode_pool(model: SentenceTransformer, target_devices: list[str] | None = None) -> Any:

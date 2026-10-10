@@ -16,9 +16,9 @@ import typer
 from rich.console import Console
 
 from src.config import DEFAULT_INDEX_DIR
-from src.embed import DEFAULT_BATCH_SIZE, DEFAULT_EMBEDDING_MODEL, encode_documents_with_backoff, load_embedding_model
+from src.embed import DEFAULT_BATCH_SIZE, DEFAULT_EMBEDDING_MODEL, DEFAULT_MAX_SEQ_LENGTH, encode_documents_with_backoff, load_embedding_model
 from src.retrieval.bm25 import BM25Index
-from src.retrieval.multivector import MultiVectorIndex, build_section_table, make_book_meta, section_stats
+from src.retrieval.multivector import DEFAULT_CHUNK_CHARS, MultiVectorIndex, build_section_table, make_book_meta, section_stats
 from src.vector_index import (
     DEFAULT_PROFILES_PATH,
     build_faiss_index,
@@ -42,8 +42,10 @@ def main(
     bm25: bool = typer.Option(True, "--bm25/--no-bm25", help="Also build a BM25 index over the full profile text."),
     model: str = typer.Option(DEFAULT_EMBEDDING_MODEL, help="SentenceTransformer model for the dense index."),
     device: str | None = typer.Option(None, help="torch device, e.g. cuda:0 or cpu."),
-    dtype: str = typer.Option("fp32", help="fp32 | bf16 | fp16; bf16 for the 4B model on a 16 GB card."),
+    dtype: str = typer.Option("bf16", help="fp32 | bf16 | fp16; the 4B model needs bf16 on a 16 GB card."),
     batch_size: int = typer.Option(DEFAULT_BATCH_SIZE),
+    max_seq_length: int = typer.Option(DEFAULT_MAX_SEQ_LENGTH, help="Token cap per text; bounds activation memory."),
+    chunk_chars: int = typer.Option(DEFAULT_CHUNK_CHARS, help="Multi only: cut sections longer than this into pieces at paragraph boundaries; 0 keeps whole chapters."),
     limit: int | None = typer.Option(None, help="First N profiles only (smoke run)."),
     cards: Path | None = typer.Option(None, help="book_cards.parquet: adds a card section per book to a multi-vector index."),
     overwrite: bool = typer.Option(False),
@@ -70,7 +72,7 @@ def main(
         console.print(f"BM25: {index.size} docs, vocab {len(index.postings)}, {summary['bm25']['seconds']}s")
 
     if dense != "none":
-        embedder = load_embedding_model(model, device=device, dtype=dtype)
+        embedder = load_embedding_model(model, device=device, dtype=dtype, max_seq_length=max_seq_length)
         started = time.perf_counter()
         if dense == "single":
             embeddings, used_batch = encode_documents_with_backoff(embedder, frame["profile_text"].tolist(), batch_size=batch_size)
@@ -85,8 +87,10 @@ def main(
                 card_texts = {novel_id: card.text() for novel_id, card in load_cards(cards).items()}
                 summary["cards"] = {"path": cards.as_posix(), "books_with_card": sum(1 for n in frame["novel_id"].astype(str) if n in card_texts)}
                 console.print(f"Cards: {summary['cards']}")
-            texts, records = build_section_table(frame, card_texts)
+            texts, records = build_section_table(frame, card_texts, chunk_chars=chunk_chars or None)
             stats = section_stats(records)
+            stats["chunk_chars"] = chunk_chars
+            stats["chars_p50"] = int(sorted(len(t) for t in texts)[len(texts) // 2])
             summary["sections"] = stats
             console.print(f"Sections: {stats}")
             if stats["share_single"] > 0.5:
@@ -103,6 +107,9 @@ def main(
         metadata["dense"] = dense
         metadata["dtype"] = dtype
         metadata["batch_size"] = used_batch
+        metadata["max_seq_length"] = max_seq_length
+        if dense == "multi":
+            metadata["chunk_chars"] = chunk_chars
         save_index_metadata(metadata, out_dir / "index_metadata.json")
         summary["dense"] = {"mode": dense, "model": model, "vectors": vectors, "dim": int(embeddings.shape[1]), "batch_size": used_batch, "seconds": round(time.perf_counter() - started, 1)}
         console.print(f"Dense ({dense}): {vectors} vectors × {embeddings.shape[1]}, {summary['dense']['seconds']}s")

@@ -11,6 +11,7 @@ section texts are recovered from ``profile_text`` by the markers
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -25,6 +26,13 @@ EXCERPT_RE = re.compile(r"节选\d+：\n")
 BLURB_MARKER = "\n内容简介：\n"
 EXCERPTS_MARKER = "\n正文节选：\n"
 SECTIONS_FILE = "sections.json"
+# digest_v2 sections are whole chapters (median 3,100 characters, up to 8,000). One vector over a whole
+# chapter averages several scenes; Qwen3-Embedding-0.6B/4B both degrade past ~1k tokens of Chinese
+# prose. Chapters are therefore cut into pieces of at most this many characters at paragraph
+# boundaries (2026-10-10 decision, with the move to the 4B model); the pieces keep the chapter's kind.
+DEFAULT_CHUNK_CHARS = 1500
+HEADING_MAX_CHARS = 60
+SENTENCE_BREAK_RE = re.compile(r"(?<=[。！？!?…”」』])|(?<= / )")
 INDEX_FILE = "faiss.index"
 META_FILE = "index_metadata.json"
 
@@ -58,10 +66,87 @@ def split_profile_sections(profile_text: str) -> list[Section]:
     return sections
 
 
-def build_section_table(profiles: pd.DataFrame, card_texts: dict[str, str] | None = None) -> tuple[list[str], list[SectionRecord]]:
+def split_long_paragraph(paragraph: str, max_chars: int) -> list[str]:
+    """Cut one over-long paragraph at sentence ends (or the ' / ' of a title list); hard cut as a last resort."""
+
+    if len(paragraph) <= max_chars:
+        return [paragraph]
+    pieces: list[str] = []
+    current = ""
+    for sentence in (x for x in SENTENCE_BREAK_RE.split(paragraph) if x):
+        while len(sentence) > max_chars:  # a sentence longer than the budget: hard cut
+            if current:
+                pieces.append(current)
+                current = ""
+            pieces.append(sentence[:max_chars])
+            sentence = sentence[max_chars:]
+        if current and len(current) + len(sentence) > max_chars:
+            pieces.append(current)
+            current = ""
+        current += sentence
+    if current:
+        pieces.append(current)
+    return [piece.strip() for piece in pieces if piece.strip()]
+
+
+def chunk_text(text: str, max_chars: int) -> list[str]:
+    """Split ``text`` into pieces of at most ``max_chars`` at paragraph boundaries, sized about equally
+    (so a 3,100-character chapter becomes two pieces of ~1,550 rather than 1,500 + 100)."""
+
+    text = text.strip()
+    if not text:
+        return []
+    if len(text) <= max_chars:
+        return [text]
+    units: list[str] = []
+    for paragraph in text.split("\n"):
+        if paragraph.strip():
+            units.extend(split_long_paragraph(paragraph.strip(), max_chars))
+    total = sum(len(unit) + 1 for unit in units)
+    wanted = max(1, math.ceil(total / max_chars))
+    target = total / wanted
+    pieces: list[str] = []
+    current: list[str] = []
+    length = 0
+    for unit in units:
+        full = current and length + len(unit) + 1 > max_chars
+        balanced = current and len(pieces) < wanted - 1 and length >= target
+        if full or balanced:
+            pieces.append("\n".join(current))
+            current, length = [], 0
+        current.append(unit)
+        length += len(unit) + 1
+    if current:
+        pieces.append("\n".join(current))
+    return pieces
+
+
+def chunk_section(section: Section, max_chars: int) -> list[Section]:
+    """A section longer than ``max_chars`` becomes several of the same kind. Digest chapter sections start
+    with the chapter title on its own line; that heading is repeated on every piece so each vector still
+    knows which chapter it came from."""
+
+    text = section.text.strip()
+    if len(text) <= max_chars:
+        return [section] if text else []
+    first, sep, rest = text.partition("\n")
+    heading = first.strip() if sep and len(first.strip()) <= HEADING_MAX_CHARS else ""
+    body = rest if heading else text
+    budget = max_chars - (len(heading) + 1 if heading else 0)
+    if budget < max_chars // 2:  # heading too long to repeat: treat it as body
+        heading, body, budget = "", text, max_chars
+    pieces = chunk_text(body, budget)
+    prefix = f"{heading}\n" if heading else ""
+    return [Section(section.kind, prefix + piece) for piece in pieces]
+
+
+def build_section_table(
+    profiles: pd.DataFrame, card_texts: dict[str, str] | None = None, chunk_chars: int | None = DEFAULT_CHUNK_CHARS
+) -> tuple[list[str], list[SectionRecord]]:
     """One row per section. A digest table carries its sections explicitly (``sections_json``); an old
     profile table is split by its markers. With ``card_texts`` (novel_id -> card text) a book also gets
-    a "card" section, prefixed with its title so title queries still land on it."""
+    a "card" section, prefixed with its title so title queries still land on it. ``chunk_chars`` cuts
+    sections longer than that into pieces of the same kind (None or 0 keeps sections whole)."""
 
     texts: list[str] = []
     records: list[SectionRecord] = []
@@ -75,6 +160,8 @@ def build_section_table(profiles: pd.DataFrame, card_texts: dict[str, str] | Non
         card = (card_texts or {}).get(novel_id)
         if card:
             sections.append(Section("card", f"标题：{row.title_guess}\n{card}"))
+        if chunk_chars:
+            sections = [piece for section in sections for piece in chunk_section(section, chunk_chars)]
         for ordinal, section in enumerate(sections):
             texts.append(section.text)
             records.append(SectionRecord(novel_id=novel_id, kind=section.kind, ordinal=ordinal))

@@ -7,7 +7,7 @@ import pytest
 from src.retrieval.bm25 import BM25Index
 from src.retrieval.hybrid import SingleVectorSearcher, load_searchers
 from src.retrieval.multivector import MultiVectorIndex, SectionRecord
-from src.retrieval.pooling import DEFAULT_SECTION_WEIGHTS, derive_single_index, parse_weights, pool_book_vectors, reconstruct_vectors
+from src.retrieval.pooling import DEFAULT_KIND_WEIGHTS, DEFAULT_SECTION_WEIGHTS, derive_single_index, parse_weights, pool_book_vectors, reconstruct_vectors
 
 
 def unit(*values: float) -> np.ndarray:
@@ -40,6 +40,20 @@ def test_pool_book_vectors_applies_kind_weights_and_never_drops_a_book() -> None
     pooled, _ = pool_book_vectors(VECTORS, RECORDS, weights={"blurb": 0.0, "opening": 0.0})
     assert np.allclose(pooled[0], unit(1, 1, 0))
     assert np.allclose(pooled[1], unit(0, 2, 0))
+
+
+def test_kind_mean_pooling_is_blind_to_chunk_count() -> None:
+    # Book "c": one blurb vector and three middle chunks pointing the same way. Per-vector pooling lets the
+    # three chunks outvote the blurb; kind-mean pooling weighs the kinds, not the chunks.
+    records = [SectionRecord("c", "blurb", 0)] + [SectionRecord("c", "middle", i) for i in range(1, 4)]
+    vectors = np.stack([unit(1, 0, 0), unit(0, 1, 0), unit(0, 1, 0), unit(0, 1, 0)])
+    pooled, _ = pool_book_vectors(vectors, records)
+    assert np.allclose(pooled[0], unit(1, 3, 0))
+    pooled, _ = pool_book_vectors(vectors, records, kind_mean=True)
+    assert np.allclose(pooled[0], unit(1, 1, 0))
+    pooled, _ = pool_book_vectors(vectors, records, weights={"blurb": 3.0, "middle": 1.0}, kind_mean=True)
+    assert np.allclose(pooled[0], unit(3, 1, 0))
+    assert set(DEFAULT_KIND_WEIGHTS) == {"blurb", "titles", "opening", "middle", "ending", "card"}
 
 
 def test_pool_book_vectors_rejects_mismatch() -> None:

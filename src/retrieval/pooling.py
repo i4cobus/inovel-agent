@@ -27,6 +27,13 @@ from src.vector_index import build_faiss_index, ensure_can_write, save_faiss_ind
 # fewest anchors missing from the top 1000 (16 of 55) and the best Recall@20 among those.
 DEFAULT_SECTION_WEIGHTS: dict[str, float] = {"blurb": 3.0, "titles": 3.0, "middle": 0.5}
 
+# With chunked chapters (2026-10-10) a book has ~10 opening, ~15 middle and ~5 ending vectors, so a
+# per-vector weight would let chapter length decide how much a kind counts. ``kind_mean`` pooling first
+# averages the vectors of each kind, then combines the kinds with these weights; they restate the
+# per-vector default above as kind totals (4 opening x 1, 6 middle x 0.5, 2 ending x 1) plus the card.
+# The card weight is a starting point for the bench, not a measured choice.
+DEFAULT_KIND_WEIGHTS: dict[str, float] = {"blurb": 3.0, "titles": 3.0, "opening": 4.0, "middle": 3.0, "ending": 2.0, "card": 3.0}
+
 BM25_FILE = "bm25.json"
 BOOK_META_FILE = "book_meta.json"
 ID_MAP_FILE = "novel_id_map.json"
@@ -41,13 +48,15 @@ def reconstruct_vectors(index: Any) -> np.ndarray:
 
 
 def pool_book_vectors(
-    vectors: np.ndarray, records: list[SectionRecord], weights: dict[str, float] | None = None
+    vectors: np.ndarray, records: list[SectionRecord], weights: dict[str, float] | None = None, kind_mean: bool = False
 ) -> tuple[np.ndarray, list[str]]:
     """Weighted mean of each book's section vectors, L2-normalised; books keep first-seen order.
 
     ``weights`` maps a section kind to its weight (default 1.0). A kind weighted 0 is
     dropped; a book left with no weighted section falls back to the plain mean so it is
-    never lost from the index.
+    never lost from the index. With ``kind_mean`` each vector's weight is divided by the
+    number of vectors of its kind in that book, so a kind contributes ``weights[kind]`` in
+    total however many chunks it was cut into.
     """
 
     if vectors.shape[0] != len(records):
@@ -64,6 +73,11 @@ def pool_book_vectors(
     for book_row, novel_id in enumerate(order):
         members = rows[novel_id]
         w = np.array([float(weights.get(records[r].kind, 1.0)) for r in members], dtype=np.float32)
+        if kind_mean:
+            per_kind: dict[str, int] = {}
+            for r in members:
+                per_kind[records[r].kind] = per_kind.get(records[r].kind, 0) + 1
+            w = w / np.array([per_kind[records[r].kind] for r in members], dtype=np.float32)
         if not (w > 0).any():
             w = np.ones(len(members), dtype=np.float32)
         pooled[book_row] = (vectors[members] * w[:, None]).sum(axis=0) / w.sum()
@@ -85,7 +99,12 @@ def parse_weights(items: list[str]) -> dict[str, float]:
 
 
 def derive_single_index(
-    multi_dir: Path, out_dir: Path, weights: dict[str, float] | None = None, copy_bm25: bool = True, overwrite: bool = False
+    multi_dir: Path,
+    out_dir: Path,
+    weights: dict[str, float] | None = None,
+    copy_bm25: bool = True,
+    overwrite: bool = False,
+    kind_mean: bool = False,
 ) -> dict[str, Any]:
     """Write a single-vector index directory pooled from ``multi_dir``; returns the build summary."""
 
@@ -96,7 +115,7 @@ def derive_single_index(
     ensure_can_write(targets, overwrite)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pooled, novel_ids = pool_book_vectors(reconstruct_vectors(multi.index), multi.records, weights)
+    pooled, novel_ids = pool_book_vectors(reconstruct_vectors(multi.index), multi.records, weights, kind_mean=kind_mean)
     save_faiss_index(build_faiss_index(pooled), out_dir / INDEX_FILE)
     id_map = {
         str(row): {"novel_id": novel_id, **{k: str(v) for k, v in multi.meta.get(novel_id, {}).items()}}
@@ -112,7 +131,7 @@ def derive_single_index(
             "num_vectors": len(novel_ids),
             "index_type": "IndexFlatIP",
             "pooled_from": multi_dir.as_posix(),
-            "pooling": "weighted_mean",
+            "pooling": "kind_mean" if kind_mean else "weighted_mean",
             "section_weights": weights or {},
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -130,6 +149,7 @@ def derive_single_index(
         "books": len(novel_ids),
         "sections": len(multi.records),
         "dim": int(pooled.shape[1]),
+        "pooling": "kind_mean" if kind_mean else "weighted_mean",
         "section_weights": weights or {},
         "created_at": metadata["created_at"],
     }
