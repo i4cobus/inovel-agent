@@ -210,7 +210,7 @@ Hit@50 0.273，Hit@200 0.509。删掉重排层后，agent 面对的就是这个�
 
 每本书用本地模型从 profile（约 8,000 字）提炼一张卡：题材、标签（按附录 A 的 27 条定义
 表逐条判 yes / no / unclear）、主角类型、背景、节奏、基调、一句话简介。存
-`data/processed/book_cards.parquet`，按 prompt 版本和模型缓存。
+`data/processed/book_cards_flash.parquet`（Flash 全量；`book_cards.parquet` 是 9B 试点），按 prompt 版本、digest 版本和模型缓存。
 
 用途：卡文本嵌入为一个额外向量进多向量索引；标签字段在 `search_books` 里作为过滤条件
 （`exclude_tropes`），先过滤再取 top-k；`check_trope` 先查卡，卡上 unclear 或标签不在卡上

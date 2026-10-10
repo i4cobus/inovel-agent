@@ -100,8 +100,8 @@ def build_search_books(searcher: BookSearcher, budget: ContextBudget, profiles: 
     def preview_for(row: dict[str, Any]) -> str:
         if profiles is not None:
             full = profiles.get(str(row.get("novel_id", "")))
-            if full and full.get("profile"):
-                return synopsis_preview(full["profile"], budget.preview_chars)
+            if full and (full.get("blurb") or full.get("profile")):
+                return synopsis_preview(full.get("blurb") or full["profile"], budget.preview_chars)
         return truncate(str(row.get("profile_text_preview", "")), budget.preview_chars)
 
     def handler(query: str, k: int = 10) -> list[dict[str, Any]]:
@@ -143,22 +143,35 @@ def build_search_books(searcher: BookSearcher, budget: ContextBudget, profiles: 
 
 
 def build_get_profile(profiles: ProfileLookup, budget: ContextBudget) -> ToolSpec:
+    """Since 2026-10-10 the answer is the book card first (题材 / 元素 / 风格 / 主角 / 一句话, built offline
+    from the whole digest), then the author's synopsis, then an opening excerpt. The digest's first
+    1,200 characters alone were the header and a sliver of chapter one once digest_v2 made the opening
+    sections whole chapters."""
+
+    from src.retrieval.multivector import synopsis_preview
+
     def handler(novel_id: str) -> dict[str, Any]:
         row = profiles.get(str(novel_id))
         if row is None:
             raise ToolError(f"没有这本书：{novel_id}")
-        return {
-            "novel_id": str(novel_id),
-            "title": row.get("title", ""),
-            "profile": truncate(row.get("profile", ""), budget.profile_chars),
-        }
+        result: dict[str, Any] = {"novel_id": str(novel_id), "title": row.get("title", "")}
+        if row.get("card"):
+            result["card"] = row["card"]
+        if row.get("blurb"):
+            result["blurb"] = synopsis_preview(row["blurb"], budget.blurb_chars)
+        result["opening"] = truncate(row.get("profile", ""), budget.profile_chars)
+        return result
 
     def redact(result: Any) -> Any:
-        return {**result, "profile": text_fingerprint(result.get("profile", ""))}
+        # The card is derived text and may stay; the synopsis and the excerpt are corpus text.
+        redacted = {**result, "opening": text_fingerprint(result.get("opening", ""))}
+        if "blurb" in result:
+            redacted["blurb"] = text_fingerprint(result["blurb"])
+        return redacted
 
     return ToolSpec(
         name="get_profile",
-        description="读一本书的档案：作者简介加若干章节摘录，用来判断题材、主角、节奏和是否含有某种元素。",
+        description="读一本书的档案：card 是离线建好的书卡（题材、元素、风格五维、主角、背景、一句话），blurb 是作者简介，opening 是开头摘录。用来判断题材、主角、感情线、爽度和是否含有某种元素；没有 card 的书只能看 blurb 和 opening。",
         parameters={
             "type": "object",
             "properties": {"novel_id": {"type": "string", "description": "search_books 返回的 novel_id"}},

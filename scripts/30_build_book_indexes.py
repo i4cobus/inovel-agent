@@ -28,6 +28,7 @@ from src.vector_index import (
     save_faiss_index,
     save_id_map,
     save_index_metadata,
+    table_digest_version,
 )
 
 app = typer.Typer(add_completion=False)
@@ -61,7 +62,9 @@ def main(
     if frame.empty:
         raise typer.BadParameter("No valid profiles.")
     console.print(f"Profiles: {len(frame)} (skipped {loaded.skipped_rows})")
-    summary: dict[str, object] = {"profiles": len(frame), "created_at": datetime.now(timezone.utc).isoformat()}
+    digest_version = table_digest_version(frame)
+    summary: dict[str, object] = {"profiles": len(frame), "digest_version": digest_version, "created_at": datetime.now(timezone.utc).isoformat()}
+    console.print(f"digest_version: {digest_version}")
 
     if bm25:
         started = time.perf_counter()
@@ -102,7 +105,12 @@ def main(
             MultiVectorIndex.build(embeddings, records, make_book_meta(frame)).save(out_dir)
             vectors = len(records)
         metadata = make_index_metadata(
-            model_name=model, embedding_dim=int(embeddings.shape[1]), num_vectors=vectors, normalize_embeddings=True, source_profiles=profiles
+            model_name=model,
+            embedding_dim=int(embeddings.shape[1]),
+            num_vectors=vectors,
+            normalize_embeddings=True,
+            source_profiles=profiles,
+            digest_version=digest_version,
         )
         metadata["dense"] = dense
         metadata["dtype"] = dtype

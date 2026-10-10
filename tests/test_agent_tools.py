@@ -29,7 +29,11 @@ class FakeSearcher:
 
 class FakeProfiles:
     def get(self, novel_id: str) -> dict[str, str] | None:
-        return {"title": "书", "profile": "正文" * 2000} if novel_id == "n1" else None
+        if novel_id == "n1":
+            return {"title": "书", "profile": "正文" * 2000}
+        if novel_id == "n2":
+            return {"title": "书二", "profile": "第一章\n" + "开头" * 2000, "blurb": "标题：书二\n\n内容简介：\n" + "简介" * 400, "card": "题材：玄幻·东方玄幻\n元素：系统"}
+        return None
 
 
 class FakeTropeJudge:
@@ -76,9 +80,20 @@ def test_search_books_applies_preview_budget_and_k_bounds() -> None:
 def test_get_profile_truncates_and_rejects_unknown_books() -> None:
     registry = full_registry()
     profile = registry.call("get_profile", {"novel_id": "n1"})
-    assert len(profile["profile"]) == ContextBudget().profile_chars
+    assert len(profile["opening"]) == ContextBudget().profile_chars
+    assert "card" not in profile and "blurb" not in profile
     with pytest.raises(ToolError, match="没有这本书"):
         registry.call("get_profile", {"novel_id": "zzz"})
+
+
+def test_get_profile_returns_card_and_synopsis_when_the_book_has_them() -> None:
+    registry = full_registry()
+    profile = registry.call("get_profile", {"novel_id": "n2"})
+    assert profile["card"].startswith("题材：玄幻")
+    assert profile["blurb"].startswith("简介") and len(profile["blurb"]) == ContextBudget().blurb_chars  # header stripped
+    assert profile["opening"].startswith("第一章") and len(profile["opening"]) == ContextBudget().profile_chars
+    redacted = registry.redactors()["get_profile"](profile)
+    assert redacted["card"] == profile["card"] and "简介简介" not in json.dumps(redacted, ensure_ascii=False) and "开头开头" not in json.dumps(redacted, ensure_ascii=False)
 
 
 def test_check_term_rule_verdicts_and_null_for_meta_labels() -> None:
@@ -159,7 +174,7 @@ def test_redaction_strips_corpus_text_but_keeps_ids() -> None:
     )
     redacted = traj.redacted(registry.redactors())
     observations = redacted["steps"][0]["observations"]
-    assert observations[0]["result"]["profile"] == text_fingerprint(profile["profile"])
+    assert observations[0]["result"]["opening"] == text_fingerprint(profile["opening"])
     assert observations[0]["result"]["novel_id"] == "n1"
     assert observations[1]["result"]["quotes"] == [text_fingerprint("原文引文")]
     assert observations[1]["result"]["verdict"] == "yes"
@@ -191,8 +206,10 @@ def test_compact_tool_message_keeps_ids_and_titles_only() -> None:
     rows = json.dumps([{"novel_id": "n1", "title": "书一", "preview": "很长" * 200, "score": 0.5}], ensure_ascii=False)
     compact = compact_tool_message(rows, "search_books")
     assert compact.startswith("[已压缩的检索结果") and "n1|书一" in compact and "很长很长很长" not in compact
-    profile = json.dumps({"novel_id": "n1", "title": "书一", "profile": "正文" * 500}, ensure_ascii=False)
+    profile = json.dumps({"novel_id": "n1", "title": "书一", "opening": "正文" * 500}, ensure_ascii=False)
     assert len(compact_tool_message(profile, "get_profile")) < 220
+    carded = json.dumps({"novel_id": "n1", "title": "书一", "card": "题材：玄幻", "opening": "正文" * 500}, ensure_ascii=False)
+    assert "题材：玄幻" in compact_tool_message(carded, "get_profile") and "正文正文" not in compact_tool_message(carded, "get_profile")
     trope = json.dumps({"verdict": "yes", "quotes": ["引文"], "confidence": "high"}, ensure_ascii=False)
     assert "引文" not in compact_tool_message(trope, "check_trope") and "yes" in compact_tool_message(trope, "check_trope")
     assert compact_tool_message("not json " * 50, "x").endswith("…[截断]")

@@ -17,7 +17,8 @@ from src.agent.memory import UserMemory
 @dataclass(frozen=True)
 class ContextBudget:
     preview_chars: int = 300
-    profile_chars: int = 1200
+    profile_chars: int = 1200  # opening excerpt returned by get_profile
+    blurb_chars: int = 500  # author synopsis returned by get_profile
     passage_chars: int = 800
     max_passages: int = 5
     memory_chars: int = 500
@@ -61,7 +62,8 @@ def compact_tool_message(content: str, tool_name: str) -> str:
         rows = [f"{row.get('novel_id', '')}|{row.get('title', '')}" for row in data if isinstance(row, dict)]
         return "[已压缩的检索结果，novel_id|书名] " + "; ".join(rows)
     if tool_name == "get_profile" and isinstance(data, dict):
-        return f"[已读档案] {data.get('novel_id', '')}|{data.get('title', '')}: {truncate(str(data.get('profile', '')), 150)}"
+        gist = data.get("card") or data.get("opening") or data.get("profile") or ""
+        return f"[已读档案] {data.get('novel_id', '')}|{data.get('title', '')}: {truncate(str(gist), 150)}"
     if isinstance(data, dict) and "quotes" in data:
         return json.dumps({k: v for k, v in data.items() if k != "quotes"}, ensure_ascii=False)
     return truncate(content, 400)

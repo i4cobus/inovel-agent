@@ -13,6 +13,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from src.retrieval.cards import DEFAULT_CARDS_PATH
 from src.agent.backends import DEFAULT_AGENT_MODEL, DEFAULT_CHAT_BASE_URL, build_agent
 from src.agent.loop import AgentConfig
 from src.agent_eval.runner import RunPaths, run_tasks
@@ -34,6 +35,7 @@ def main(
     reasoning_effort: str | None = typer.Option("none"),
     max_steps: int = typer.Option(10),
     index_dir: Path = typer.Option(DEFAULT_INDEX_DIR),
+    cards: Path | None = typer.Option(DEFAULT_CARDS_PATH, help="Book cards parquet for get_profile; a missing file means no cards."),
     device: str | None = typer.Option("cpu", help="Device for the query embedder; the GPU belongs to the model server."),
 ) -> None:
     selected = []
@@ -48,7 +50,7 @@ def main(
     paths = RunPaths(run_dir=PROJECT_ROOT / "eval" / "agent" / "runs" / run_id, local_dir=DATA_DIR / "eval_runs" / run_id)
     if paths.redacted_path.exists():
         raise typer.BadParameter(f"{paths.run_dir} already has trajectories; pick another run id")
-    agent = build_agent(model=model, base_url=base_url, index_dir=index_dir, device=device, reasoning_effort=reasoning_effort, config=AgentConfig(max_steps=max_steps))
+    agent = build_agent(model=model, base_url=base_url, index_dir=index_dir, cards_path=cards, device=device, reasoning_effort=reasoning_effort, config=AgentConfig(max_steps=max_steps))
     console.print(f"ready {agent.info}; {len(selected)} tasks ({split})")
     config = {"run_id": run_id, "split": split, "model": model, "reasoning_effort": reasoning_effort, "max_steps": max_steps, "index_dir": index_dir.as_posix(), "task_files": [p.as_posix() for p in tasks], **agent.info}
 

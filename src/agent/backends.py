@@ -27,6 +27,7 @@ from src.agent.tools import (
 from src.agent.trope import CachedTropeJudge
 from src.chat_transport import HTTPChatTransport
 from src.config import DEFAULT_INDEX_DIR, DEFAULT_OUTPUT_PATH, PROCESSED_DATA_DIR
+from src.retrieval.cards import DEFAULT_CARDS_PATH
 from src.vector_index import DEFAULT_PROFILES_PATH
 
 DEFAULT_DENSITY_PATH = PROCESSED_DATA_DIR / "term_density.parquet"
@@ -35,21 +36,51 @@ DEFAULT_AGENT_MODEL = "qwen3.5:9b"
 
 
 class ParquetProfiles:
-    """``ProfileLookup`` over novel_profiles.parquet, loaded once into memory."""
+    """``ProfileLookup`` over the digest table (``novel_digests.parquet``), loaded once into memory.
 
-    def __init__(self, rows: dict[str, dict[str, str]]) -> None:
+    Each row keeps ``title``, ``blurb`` (the digest's header + synopsis section), ``profile`` (the
+    opening chapters, cut to ``keep_chars``: get_profile returns at most 1,200 of them and a whole
+    digest_v2 table is 330M characters) and ``card`` (the book card's text, when a cards parquet is
+    given). An old profile table without ``sections_json`` keeps its text head as ``profile``.
+    """
+
+    def __init__(self, rows: dict[str, dict[str, str]], digest_version: str | None = None, cards: int = 0) -> None:
         self.rows = rows
+        self.digest_version = digest_version
+        self.cards = cards
 
     @classmethod
-    def load(cls, path: Path = DEFAULT_PROFILES_PATH) -> "ParquetProfiles":
-        import pandas as pd
+    def load(cls, path: Path = DEFAULT_PROFILES_PATH, cards_path: Path | None = None, keep_chars: int = 3000) -> "ParquetProfiles":
+        import json
 
-        frame = pd.read_parquet(path, columns=["novel_id", "title_guess", "profile_text"])
-        rows = {
-            str(row.novel_id): {"title": str(row.title_guess or ""), "profile": str(row.profile_text or "")}
-            for row in frame.itertuples(index=False)
-        }
-        return cls(rows)
+        import pyarrow.parquet as pq
+
+        names = set(pq.read_schema(path).names)
+        # A digest table carries its sections explicitly; the joined profile_text is then redundant and
+        # is not read (reading both peaked at 5 GB of RSS on the 1.27 GB digest_v2 table). Row batches
+        # keep the peak at one batch of texts rather than the whole column.
+        wanted = ("novel_id", "title_guess", "sections_json", "digest_version") if "sections_json" in names else ("novel_id", "title_guess", "profile_text")
+        columns = [c for c in wanted if c in names]
+        card_texts: dict[str, str] = {}
+        if cards_path is not None and cards_path.exists():
+            from src.retrieval.cards import load_cards
+
+            card_texts = {novel_id: card.text() for novel_id, card in load_cards(cards_path).items()}
+        rows: dict[str, dict[str, str]] = {}
+        versions: set[str] = set()
+        for batch in pq.ParquetFile(path).iter_batches(batch_size=256, columns=columns):
+            for record in batch.to_pylist():
+                novel_id = str(record["novel_id"])
+                blurb, opening = "", ""
+                if record.get("sections_json"):
+                    sections = json.loads(str(record["sections_json"]))
+                    blurb = next((str(s["text"]) for s in sections if s.get("kind") == "blurb"), "")
+                    opening = "\n\n".join(str(s["text"]) for s in sections if s.get("kind") == "opening")
+                profile = (opening or str(record.get("profile_text") or ""))[:keep_chars]
+                rows[novel_id] = {"title": str(record.get("title_guess") or ""), "profile": profile, "blurb": blurb, "card": card_texts.get(novel_id, "")}
+                if record.get("digest_version"):
+                    versions.add(str(record["digest_version"]))
+        return cls(rows, digest_version=next(iter(versions)) if len(versions) == 1 else None, cards=sum(1 for r in rows.values() if r["card"]))
 
     def get(self, novel_id: str) -> dict[str, str] | None:
         return self.rows.get(novel_id)
@@ -142,6 +173,7 @@ def build_agent(
     base_url: str = DEFAULT_CHAT_BASE_URL,
     index_dir: Path = DEFAULT_INDEX_DIR,
     profiles_path: Path = DEFAULT_PROFILES_PATH,
+    cards_path: Path | None = DEFAULT_CARDS_PATH,
     density_path: Path = DEFAULT_DENSITY_PATH,
     inventory_path: Path = DEFAULT_OUTPUT_PATH,
     memory_path: Path = DEFAULT_MEMORY_PATH,
@@ -163,7 +195,7 @@ def build_agent(
     embedder = factory(metadata["model_name"], device=device, dtype=embedding_dtype or metadata.get("dtype", "fp32"))
     searcher = load_searchers(index_dir, embedder)[0]  # the dense searcher; BM25/hybrid are not search_books
 
-    profiles = ParquetProfiles.load(profiles_path)
+    profiles = ParquetProfiles.load(profiles_path, cards_path=cards_path)
     densities = load_density_table(density_path)
     memory = UserMemory.load(memory_path)
     transport = HTTPChatTransport(model=model, base_url=base_url, reasoning_effort=reasoning_effort)
@@ -185,6 +217,11 @@ def build_agent(
         "index_dir": index_dir.as_posix(),
         "searcher": searcher.name,
         "profiles": len(profiles),
+        "cards": profiles.cards,
+        "digest_version": profiles.digest_version,
+        "index_digest_version": metadata.get("digest_version"),
         "density_rows": len(densities),
     }
+    if metadata.get("digest_version") and profiles.digest_version and metadata["digest_version"] != profiles.digest_version:
+        bundle.info["warning"] = f"index built from {metadata['digest_version']} but profiles are {profiles.digest_version}"
     return bundle

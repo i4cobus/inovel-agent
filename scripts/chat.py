@@ -15,6 +15,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from src.retrieval.cards import DEFAULT_CARDS_PATH
 from src.agent.backends import DEFAULT_AGENT_MODEL, DEFAULT_CHAT_BASE_URL, build_agent
 from src.agent.loop import AgentConfig
 from src.agent.trajectory import append_jsonl
@@ -29,6 +30,7 @@ def main(
     model: str = typer.Option(DEFAULT_AGENT_MODEL),
     base_url: str = typer.Option(DEFAULT_CHAT_BASE_URL),
     index_dir: Path = typer.Option(DEFAULT_INDEX_DIR),
+    cards: Path | None = typer.Option(DEFAULT_CARDS_PATH, help="Book cards parquet for get_profile; a missing file means no cards."),
     device: str | None = typer.Option(None, help="Device for the query embedder; cpu is fine."),
     max_steps: int = typer.Option(10),
     reasoning_effort: str | None = typer.Option(None, help="Ollama thinking control, e.g. none / low / high; None leaves the model default."),
@@ -36,7 +38,7 @@ def main(
     trajectories: Path = typer.Option(DATA_DIR / "trajectories" / "chat.jsonl"),
     once: str | None = typer.Option(None, help="Ask one question and exit (for smoke tests)."),
 ) -> None:
-    agent = build_agent(model=model, base_url=base_url, index_dir=index_dir, device=device, reasoning_effort=reasoning_effort, config=AgentConfig(max_steps=max_steps))
+    agent = build_agent(model=model, base_url=base_url, index_dir=index_dir, cards_path=cards, device=device, reasoning_effort=reasoning_effort, config=AgentConfig(max_steps=max_steps))
     console.print(f"[bold]ready[/bold] {agent.info}")
     history: list[dict] = []
 

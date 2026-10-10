@@ -127,8 +127,10 @@ def make_index_metadata(
     num_vectors: int,
     normalize_embeddings: bool,
     source_profiles: Path,
+    digest_version: str | None = None,
 ) -> dict[str, Any]:
-    """Build serializable metadata for an index artifact."""
+    """Build serializable metadata for an index artifact. ``digest_version`` records which digest the
+    vectors were built from, so a rebuilt digest and a stale index cannot be paired silently."""
 
     return {
         "model_name": model_name,
@@ -137,8 +139,18 @@ def make_index_metadata(
         "normalize_embeddings": normalize_embeddings,
         "index_type": "IndexFlatIP",
         "source_profiles": source_profiles.as_posix(),
+        "digest_version": digest_version,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def table_digest_version(frame: pd.DataFrame) -> str | None:
+    """The single ``digest_version`` of a profile table, or None (old profile tables, mixed tables)."""
+
+    if "digest_version" not in frame.columns:
+        return None
+    versions = set(frame["digest_version"].dropna().astype(str))
+    return next(iter(versions)) if len(versions) == 1 else None
 
 
 def save_index_metadata(metadata: dict[str, Any], metadata_path: Path) -> None:

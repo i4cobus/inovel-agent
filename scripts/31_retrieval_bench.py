@@ -57,7 +57,16 @@ def main(
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("a", encoding="utf-8") as handle:
         for result in results:
-            record = {"config": result.name, "index_dir": index_dir.as_posix(), "depth": depth, "recall_k": recall_k, "at": datetime.now(timezone.utc).isoformat(), **result.metrics()}
+            record = {
+                "config": result.name,
+                "index_dir": index_dir.as_posix(),
+                "model": metadata.get("model_name"),
+                "digest_version": metadata.get("digest_version"),
+                "depth": depth,
+                "recall_k": recall_k,
+                "at": datetime.now(timezone.utc).isoformat(),
+                **result.metrics(),
+            }
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     console.print(format_table(results))
 

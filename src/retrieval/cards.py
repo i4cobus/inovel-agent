@@ -30,7 +30,8 @@ from src.llm_json import extract_json_object
 from src.retrieval.card_schema import ELEMENT_ALIASES, ELEMENT_EVIDENCE_NAMES, ELEMENT_QUOTE_SIGNATURES, ELEMENT_TO_STYLE, ELEMENTS, GENRES, MAX_KEYWORDS, STYLE_OPTIONS, SUBGENRE_ALIASES, SUBGENRE_TO_GENRE, UNKNOWN_GENRE, genre_of, vocabulary_text
 
 CARD_PROMPT_VERSION = "card_v3.2"
-DEFAULT_CARDS_PATH = DATA_DIR / "processed" / "book_cards.parquet"
+# The full set is the Flash build (card_v3.2 on digest_v2, 2026-10-10); book_cards.parquet was the 9B pilot.
+DEFAULT_CARDS_PATH = DATA_DIR / "processed" / "book_cards_flash.parquet"
 DEFAULT_CARD_CACHE_PATH = DATA_DIR / "cache" / "book_cards.jsonl"
 LIST_FIELDS = ("elements", "elements_unverified", "keywords", "dropped")
 DICT_FIELDS = ("style", "evidence")

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,19 @@ from src.vector_index import build_faiss_index, make_id_map, save_faiss_index, s
 def test_parquet_profiles_and_density_table(tmp_path: Path) -> None:
     pd.DataFrame([{"novel_id": "a", "title_guess": "书A", "profile_text": "正文"}]).to_parquet(tmp_path / "p.parquet")
     profiles = ParquetProfiles.load(tmp_path / "p.parquet")
-    assert profiles.get("a") == {"title": "书A", "profile": "正文"} and profiles.get("zz") is None and len(profiles) == 1
+    assert profiles.get("a") == {"title": "书A", "profile": "正文", "blurb": "", "card": ""} and profiles.get("zz") is None and len(profiles) == 1
+    assert profiles.digest_version is None and profiles.cards == 0
+
+    # A digest table: blurb and opening come from sections_json, the opening is cut, cards attach by novel_id.
+    sections = [{"kind": "blurb", "text": "标题：书B\n\n内容简介：\n一个少年"}, {"kind": "opening", "text": "第一章\n" + "正文" * 100}, {"kind": "middle", "text": "中段"}]
+    pd.DataFrame([{"novel_id": "b", "title_guess": "书B", "profile_text": "x", "sections_json": json.dumps(sections, ensure_ascii=False), "digest_version": "digest_v2"}]).to_parquet(tmp_path / "d.parquet")
+    pd.DataFrame([{"novel_id": "b", "genre": "玄幻", "subgenre": "东方玄幻", "elements": json.dumps(["系统"]), "elements_unverified": "[]", "keywords": "[]", "dropped": "[]", "style": json.dumps({"爽度": "高"}, ensure_ascii=False), "protagonist": "", "setting": "", "tone": "", "one_liner": "少年崛起", "model": "m", "prompt_version": "v", "error": ""}]).to_parquet(tmp_path / "cards.parquet")
+    profiles = ParquetProfiles.load(tmp_path / "d.parquet", cards_path=tmp_path / "cards.parquet", keep_chars=50)
+    row = profiles.get("b")
+    assert row["blurb"].endswith("一个少年") and row["profile"].startswith("第一章") and len(row["profile"]) == 50
+    assert "题材：玄幻·东方玄幻" in row["card"] and "少年崛起" in row["card"]
+    assert profiles.digest_version == "digest_v2" and profiles.cards == 1
+    assert ParquetProfiles.load(tmp_path / "d.parquet", cards_path=tmp_path / "missing.parquet").cards == 0
 
     pd.DataFrame([{"novel_id": "a", "char_count": 1000, "系统": 12.5, "异能": 0.0}]).to_parquet(tmp_path / "d.parquet")
     assert load_density_table(tmp_path / "d.parquet") == {"a": {"系统": 12.5, "异能": 0.0}}
@@ -62,8 +75,10 @@ def test_build_agent_assembles_tools_from_artifacts(tmp_path: Path, monkeypatch:
         density_path=tmp_path / "density.parquet",
         inventory_path=tmp_path / "inv.parquet",
         memory_path=tmp_path / "memory" / "user.json",
+        cards_path=None,
         embedder_factory=lambda name, device=None, dtype="fp32": FakeEmbedder(),
     )
+    assert bundle.info["cards"] == 0 and "warning" not in bundle.info
     assert sorted(bundle.tools.specs) == ["check_term", "check_trope", "get_profile", "memory_read", "memory_write", "search_books"]
     assert bundle.info["searcher"] == "idx/dense_single" and bundle.info["profiles"] == 2
     rows = bundle.tools.call("search_books", {"query": "都市", "k": 2})
