@@ -33,6 +33,7 @@ def main(
     base_url: str = typer.Option(DEFAULT_CHAT_BASE_URL),
     reasoning_effort: str | None = typer.Option("none", help="Ollama: 'none' disables thinking; pass 'off' to send nothing (hosted APIs)."),
     extra_body: str = typer.Option("", help='JSON merged into every request body, e.g. {"enable_thinking": false} for Bailian.'),
+    no_thinking: bool = typer.Option(False, help="Shorthand for --extra-body '{\"enable_thinking\": false}' --reasoning-effort off (quoting-free, for pc.sh)."),
     profiles: Path = typer.Option(DEFAULT_PROFILES_PATH),
     out: Path = typer.Option(DEFAULT_CARDS_PATH),
     cache: Path = typer.Option(DEFAULT_CARD_CACHE_PATH),
@@ -70,6 +71,8 @@ def main(
     items = [(str(r.novel_id), str(r.profile_text)) for r in frame.itertuples(index=False)]
     # Ollama switches thinking off through reasoning_effort; Bailian's OpenAI-compatible endpoint
     # wants {"enable_thinking": false} in the body instead (--extra-body), with no reasoning_effort.
+    if no_thinking:
+        reasoning_effort, extra_body = "off", '{"enable_thinking": false}'
     effort = reasoning_effort if reasoning_effort not in (None, "", "off") else None
     body = json.loads(extra_body) if extra_body else {}
     api_key = api_key_file.read_text(encoding="utf-8").strip() if api_key_file is not None else None
