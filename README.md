@@ -1,4 +1,4 @@
-# inovel-agent：网文领域的对话 Agent 与 Agent 评测
+# inovel-agent：网络小说对话 Agent
 
 > English summary: [`README.en.md`](README.en.md)
 
