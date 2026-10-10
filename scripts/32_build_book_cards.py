@@ -47,6 +47,9 @@ def main(
     checkpoint: int = typer.Option(200, help="Rewrite the parquet every N cards."),
     report: bool = typer.Option(False, help="Only report vocabulary usage of the existing parquet."),
     reparse: bool = typer.Option(False, help="Re-parse the cached raw responses of the selected books with the current parser (no model calls) and rewrite the parquet."),
+    api_key_file: Path | None = typer.Option(None, help="Read the API key from this file (outside the repo) instead of INOVELREC_LLM_API_KEY; for runs on the PC."),
+    not_before: str | None = typer.Option(None, help="Sleep until this Beijing time (HH:MM) before calling the model, e.g. 22:00 for the night tariff."),
+    retry_failed: bool = typer.Option(False, help="After the pass, request the failed books once more (failures are never cached)."),
 ) -> None:
     if report:
         _report(out)
@@ -69,7 +72,8 @@ def main(
     # wants {"enable_thinking": false} in the body instead (--extra-body), with no reasoning_effort.
     effort = reasoning_effort if reasoning_effort not in (None, "", "off") else None
     body = json.loads(extra_body) if extra_body else {}
-    transport = HTTPChatTransport(model=model, base_url=base_url, reasoning_effort=effort, extra_body=body, timeout=300.0)
+    api_key = api_key_file.read_text(encoding="utf-8").strip() if api_key_file is not None else None
+    transport = HTTPChatTransport(model=model, base_url=base_url, api_key=api_key, reasoning_effort=effort, extra_body=body, timeout=300.0)
     builder = CardBuilder(transport, model, cache_path=cache, max_chars=max_chars, max_tokens=max_tokens)
     from src.retrieval.cards import card_cache_key
 
@@ -98,8 +102,19 @@ def main(
         if n % checkpoint == 0:
             _write(done, out)
 
+    if not_before:
+        _sleep_until_beijing(not_before)
     cards = builder.build_many(items, workers=workers, on_result=on_result)
     _write(cards, out)
+    if retry_failed and builder.failures:
+        failed_ids = {f["novel_id"] for f in builder.failures}
+        console.print(f"retrying {len(failed_ids)} failed books once")
+        builder.failures.clear()
+        retried = builder.build_many([(n, t) for n, t in items if n in failed_ids], workers=workers)
+        fixed = {c.novel_id: c for c in retried if not c.error}
+        cards = [fixed.get(c.novel_id, c) for c in cards]
+        errors = sum(1 for c in cards if c.error)
+        _write(cards, out)
     console.print(f"wrote {len(cards)} cards ({errors} with errors) -> {out} in {time.perf_counter() - started:.0f}s")
     if builder.failures:
         errors_path = out.with_name(out.stem + "_errors.jsonl")
@@ -111,6 +126,23 @@ def main(
             kind = failure["error"].split(":")[0]
             kinds[kind] = kinds.get(kind, 0) + 1
         console.print(f"failures by kind: {kinds} -> {errors_path}")
+
+
+def _sleep_until_beijing(hhmm: str) -> None:
+    """Block until the given Beijing wall-clock time (today or tomorrow); the night tariff starts at 22:00."""
+
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("Asia/Shanghai")
+    hour, minute = (int(x) for x in hhmm.split(":"))
+    now = datetime.now(tz)
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    wait = (target - now).total_seconds()
+    console.print(f"waiting {wait / 60:.0f} min until {target:%Y-%m-%d %H:%M} Beijing")
+    time.sleep(wait)
 
 
 def _write(cards: list, out: Path) -> None:
