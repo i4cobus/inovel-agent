@@ -187,7 +187,13 @@ def score_task(task: Mapping[str, Any], trajectories: list[Mapping[str, Any]], m
     labels: list[str] = []
     for session, trajectory, memory_state in zip(sessions, trajectories, memory_states):
         expect = session.get("expect", {})
-        must_pass = list(expect.get("must_pass", task.get("negatives_in_text", []))) if task["kind"] == "memory" else task.get("negatives_in_text", [])
+        if task["kind"] == "memory":
+            # Memory sessions state their own expectations: a one-off constraint must not be demanded of the next
+            # session (it fell back to the task-level terms until 2026-10-12, which scored the oneoff variant's second
+            # session as tool_skipped by construction). A term the user persists in this very message is also binding now.
+            must_pass = list(expect.get("must_pass", expect.get("persist", [])))
+        else:
+            must_pass = task.get("negatives_in_text", [])
         meta = task.get("negatives_meta", []) if task["kind"] == "constrained_rec" else []
         min_recs = int(expect.get("min_recommendations", 0))
         score = score_session(trajectory, must_pass, meta, densities, min_recommendations=max(min_recs, 1), require_recommendations=min_recs > 0)

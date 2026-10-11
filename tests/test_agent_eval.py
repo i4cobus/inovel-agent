@@ -194,3 +194,22 @@ def test_runner_writes_redacted_trajectories_and_memory_states_per_task(tmp_path
     densities = DENSITIES
     rows = [score_task(t.to_dict(), [x for x in trajectories if x["metadata"]["task_id"] == t.task_id], states[t.task_id], densities) for t in tasks]
     assert all(r["pass"] for r in rows), [r["labels"] for r in rows]
+
+
+def test_memory_sessions_are_scored_on_their_own_expectations() -> None:
+    from src.agent_eval.metrics import score_task
+
+    def finish_with(ids: list[str]) -> dict:
+        return {"termination": "finish", "steps": [{"tool_calls": [], "observations": [{"tool": "search_books", "result": {"results": [{"novel_id": i} for i in ids]}}], "prompt_tokens": 0, "completion_tokens": 0}], "structured": {"recommendations": [{"novel_id": i, "title": i} for i in ids]}, "metadata": {}}
+
+    task = {"task_id": "m", "kind": "memory", "variant": "oneoff", "split": "dev", "negatives_in_text": ["直播"], "sessions": [
+        {"user_message": "这一次不要直播的", "expect": {"must_not_persist": ["直播"], "must_pass": ["直播"], "min_recommendations": 1}},
+        {"user_message": "换个口味", "expect": {"must_not_persist": ["直播"], "min_recommendations": 1}},
+    ]}
+    densities = {"a": {"直播": 0.0}, "b": {"直播": 50.0}}
+    rows = score_task(task, [finish_with(["a"]), finish_with(["b"])], [{"negative": []}, {"negative": []}], densities)
+    # Session 1 skipped check_term for 直播 -> tool_skipped; session 2 is free of the one-off term even though b is full of it.
+    assert rows["sessions"][0]["labels"] == ["tool_skipped"] and rows["sessions"][1]["labels"] == []
+    persist = {**task, "variant": "persist", "sessions": [{"user_message": "记住以后都不看直播的，先推荐几本", "expect": {"persist": ["直播"], "min_recommendations": 1}}]}
+    rows = score_task(persist, [finish_with(["b"])], [{"negative": [{"value": "直播", "persistent": True}]}], densities)
+    assert "constraint_violated" in rows["sessions"][0]["labels"]  # persisted in this message: binding now
