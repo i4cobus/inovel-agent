@@ -25,8 +25,8 @@ console = Console()
 
 @app.command()
 def main(
-    multi_dir: Path = typer.Option(INDEX_DIR / "multi_0p6b", help="Directory holding faiss.index + sections.json"),
-    out_dir: Path = typer.Option(INDEX_DIR / "single_0p6b"),
+    multi_dir: Path = typer.Option(INDEX_DIR / "multi_4b", help="Directory holding faiss.index + sections.json"),
+    out_dir: Path = typer.Option(INDEX_DIR / "single_4b"),
     weight: list[str] = typer.Option([], help=f"Section-kind weight, repeatable: --weight blurb=2 --weight titles=2. Default: {DEFAULT_SECTION_WEIGHTS}"),
     plain_mean: bool = typer.Option(False, help="Ignore DEFAULT_SECTION_WEIGHTS and average every section equally"),
     kind_mean: bool = typer.Option(False, help=f"Average each kind first, then weight the kinds (for chunked indexes). Default weights then: {DEFAULT_KIND_WEIGHTS}"),
