@@ -1,17 +1,16 @@
 {
   "overall": {
     "n": 20,
-    "pass_rate": 0.65,
+    "pass_rate": 0.75,
     "finish_rate": 1.0,
     "mean_steps_per_session": 6.48,
     "mean_prompt_tokens_per_session": 47133,
-    "violation_rate_macro": 0.0556,
-    "check_term_coverage": 0.7778,
+    "violation_rate_macro": 0.0,
+    "check_term_coverage": 0.875,
     "check_trope_coverage": 0.8889,
     "labels": {
       "no_recommendation": 1,
-      "tool_skipped": 6,
-      "constraint_violated": 1
+      "tool_skipped": 4
     }
   },
   "kind": {
@@ -31,16 +30,15 @@
     },
     "memory": {
       "n": 6,
-      "pass_rate": 0.5,
+      "pass_rate": 0.8333,
       "finish_rate": 1.0,
       "mean_steps_per_session": 5.47,
       "mean_prompt_tokens_per_session": 34275,
-      "violation_rate_macro": 0.1111,
-      "check_term_coverage": 0.7037,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.9048,
       "check_trope_coverage": null,
       "labels": {
-        "tool_skipped": 3,
-        "constraint_violated": 1
+        "tool_skipped": 1
       }
     }
   },
@@ -100,17 +98,14 @@
     },
     "oneoff": {
       "n": 2,
-      "pass_rate": 0.0,
+      "pass_rate": 1.0,
       "finish_rate": 1.0,
       "mean_steps_per_session": 7.0,
       "mean_prompt_tokens_per_session": 45628,
-      "violation_rate_macro": 0.25,
-      "check_term_coverage": 0.5,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 1.0,
       "check_trope_coverage": null,
-      "labels": {
-        "tool_skipped": 2,
-        "constraint_violated": 1
-      }
+      "labels": {}
     },
     "persist": {
       "n": 1,

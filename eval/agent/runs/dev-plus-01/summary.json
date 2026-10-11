@@ -1,18 +1,18 @@
 {
   "overall": {
     "n": 20,
-    "pass_rate": 0.25,
+    "pass_rate": 0.3,
     "finish_rate": 0.7931,
     "mean_steps_per_session": 6.97,
     "mean_prompt_tokens_per_session": 49897,
     "violation_rate_macro": 0.0,
-    "check_term_coverage": 0.6889,
+    "check_term_coverage": 0.7949,
     "check_trope_coverage": 0.125,
     "labels": {
       "budget_exhausted": 3,
       "format": 5,
       "no_recommendation": 3,
-      "tool_skipped": 10
+      "tool_skipped": 9
     }
   },
   "kind": {
@@ -34,18 +34,18 @@
     },
     "memory": {
       "n": 6,
-      "pass_rate": 0.1667,
+      "pass_rate": 0.3333,
       "finish_rate": 0.7333,
       "mean_steps_per_session": 5.6,
       "mean_prompt_tokens_per_session": 36773,
       "violation_rate_macro": 0.0,
-      "check_term_coverage": 0.625,
+      "check_term_coverage": 0.8333,
       "check_trope_coverage": null,
       "labels": {
         "format": 3,
         "budget_exhausted": 1,
         "no_recommendation": 1,
-        "tool_skipped": 2
+        "tool_skipped": 1
       }
     }
   },
@@ -110,15 +110,15 @@
     },
     "oneoff": {
       "n": 2,
-      "pass_rate": 0.0,
+      "pass_rate": 0.5,
       "finish_rate": 1.0,
       "mean_steps_per_session": 6.25,
       "mean_prompt_tokens_per_session": 51070,
       "violation_rate_macro": 0.0,
-      "check_term_coverage": 0.25,
+      "check_term_coverage": 0.5,
       "check_trope_coverage": null,
       "labels": {
-        "tool_skipped": 2
+        "tool_skipped": 1
       }
     },
     "persist": {
