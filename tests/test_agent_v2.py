@@ -65,6 +65,8 @@ def test_filters_resolve_through_the_vocabulary_and_its_aliases() -> None:
     for bad in (dict(genre="武打"), dict(elements=["飞天"]), dict(style=["爽度=极高"]), dict(style=["节奏=快"])):
         with pytest.raises(FilterError):
             CardFilter.parse(**bad)
+    with pytest.raises(FilterError, match="是元素，不是题材"):
+        CardFilter.parse(genre="种田经营")
 
 
 def test_catalog_selects_by_genre_subgenre_elements_and_style() -> None:

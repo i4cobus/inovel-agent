@@ -1,0 +1,127 @@
+{
+  "overall": {
+    "n": 20,
+    "pass_rate": 0.5,
+    "finish_rate": 1.0,
+    "mean_steps_per_session": 6.45,
+    "mean_prompt_tokens_per_session": 44794,
+    "violation_rate_macro": 0.0556,
+    "check_term_coverage": 0.7778,
+    "check_trope_coverage": 0.713,
+    "labels": {
+      "tool_skipped": 9,
+      "no_recommendation": 1,
+      "constraint_violated": 1
+    }
+  },
+  "kind": {
+    "constrained_rec": {
+      "n": 14,
+      "pass_rate": 0.5714,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 7.79,
+      "mean_prompt_tokens_per_session": 60151,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.9722,
+      "check_trope_coverage": 0.713,
+      "labels": {
+        "tool_skipped": 5,
+        "no_recommendation": 1
+      }
+    },
+    "memory": {
+      "n": 6,
+      "pass_rate": 0.3333,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 5.2,
+      "mean_prompt_tokens_per_session": 30461,
+      "violation_rate_macro": 0.1111,
+      "check_term_coverage": 0.5833,
+      "check_trope_coverage": null,
+      "labels": {
+        "tool_skipped": 4,
+        "constraint_violated": 1
+      }
+    }
+  },
+  "variant": {
+    "accumulate": {
+      "n": 3,
+      "pass_rate": 0.3333,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 4.78,
+      "mean_prompt_tokens_per_session": 23966,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.5,
+      "check_trope_coverage": null,
+      "labels": {
+        "tool_skipped": 2
+      }
+    },
+    "in_text": {
+      "n": 5,
+      "pass_rate": 0.6,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 8.2,
+      "mean_prompt_tokens_per_session": 66933,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.95,
+      "check_trope_coverage": null,
+      "labels": {
+        "tool_skipped": 1,
+        "no_recommendation": 1
+      }
+    },
+    "meta": {
+      "n": 5,
+      "pass_rate": 0.6,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 7.2,
+      "mean_prompt_tokens_per_session": 55134,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": 0.6,
+      "labels": {
+        "tool_skipped": 2
+      }
+    },
+    "mixed": {
+      "n": 4,
+      "pass_rate": 0.5,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 8.0,
+      "mean_prompt_tokens_per_session": 57946,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 1.0,
+      "check_trope_coverage": 0.8542,
+      "labels": {
+        "tool_skipped": 2
+      }
+    },
+    "oneoff": {
+      "n": 2,
+      "pass_rate": 0.0,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 5.25,
+      "mean_prompt_tokens_per_session": 36182,
+      "violation_rate_macro": 0.25,
+      "check_term_coverage": 0.4375,
+      "check_trope_coverage": null,
+      "labels": {
+        "tool_skipped": 2,
+        "constraint_violated": 1
+      }
+    },
+    "persist": {
+      "n": 1,
+      "pass_rate": 1.0,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 7.0,
+      "mean_prompt_tokens_per_session": 48248,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 1.0,
+      "check_trope_coverage": null,
+      "labels": {}
+    }
+  }
+}

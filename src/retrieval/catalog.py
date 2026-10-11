@@ -38,6 +38,9 @@ def resolve_genre(value: str) -> tuple[str | None, str | None]:
     name = SUBGENRE_ALIASES.get(name, name)
     if name in SUBGENRE_TO_GENRE:
         return SUBGENRE_TO_GENRE[name], name
+    element = ELEMENT_ALIASES.get(name, name)
+    if element in ELEMENTS:  # 种田经营 / 系统 / 无限流 … are elements: the commonest slip in the first dev run
+        raise FilterError(f"「{value}」是元素，不是题材：放进 elements，genre 留空或填一级题材（{'、'.join(GENRES)}）")
     raise FilterError(f"不认识的题材「{value}」。一级：{'、'.join(GENRES)}；二级：{'、'.join(SUBGENRE_TO_GENRE)}")
 
 

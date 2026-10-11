@@ -72,7 +72,7 @@ FINISH_SCHEMA: dict[str, Any] = {
         },
     },
 }
-NUDGE = "你刚才没有调用任何工具，也没有用 finish 结束。请继续：需要更多信息就调用工具，信息够了就调用 finish 给出最终回答。"
+NUDGE = "你刚才没有调用任何工具，也没有用 finish 结束。请继续：需要更多信息就调用工具；信息够了、或者只是确认、或者需要用户补充信息，都要调用 finish（需要用户回答时 asks_user=true）。"
 LAST_STEP = "这是最后一步，步数已用尽。现在必须调用 finish，用已经掌握的信息给出最终回答；没能确认的偏好在 answer 里说明。"
 
 
@@ -83,7 +83,8 @@ def steps_hint(remaining: int) -> str:
 @dataclass(frozen=True)
 class AgentConfig:
     max_steps: int = 10
-    max_tokens: int = 1024
+    # A finish call carries the whole answer plus the recommendation list; at 1,024 it was truncated in 9 of 58 dev sessions (2026-10-12).
+    max_tokens: int = 4096
     budget: ContextBudget = ContextBudget()
 
 
@@ -210,7 +211,7 @@ class AgentLoop:
                 observation = Observation(tool=call.name, call_id=call.id, arguments=call.arguments)
                 call_started = time.perf_counter()
                 if call.arguments is None:
-                    observation.error = f"参数不是合法 JSON：{call.raw_arguments[:200]}"
+                    observation.error = f"参数不是合法 JSON（如果是回答太长被截断，请精简 answer 后重试）：{call.raw_arguments[:200]}"
                 elif call.name == FINISH_TOOL:
                     answer = str(call.arguments.get("answer", "")).strip()
                     if not answer:
