@@ -28,6 +28,7 @@ from typing import Any
 
 from src.agent.context import ContextBudget, build_system_prompt, compact_messages, render_tool_result
 from src.agent.memory import UserMemory
+from src.agent.session import SessionState
 from src.agent.tools import ToolError, ToolRegistry
 from src.agent.trajectory import Observation, Step, Trajectory
 from src.chat_transport import ChatModel, ChatResponse
@@ -58,13 +59,14 @@ FINISH_SCHEMA: dict[str, Any] = {
                 },
                 "citations": {
                     "type": "array",
-                    "description": "回答引用的章节，没有就给空列表",
+                    "description": "回答引用的章节（ask_book 返回的 chapter），没有就给空列表",
                     "items": {
                         "type": "object",
-                        "properties": {"novel_id": {"type": "string"}, "chapter_idx": {"type": "integer"}},
-                        "required": ["novel_id", "chapter_idx"],
+                        "properties": {"novel_id": {"type": "string"}, "chapter": {"type": "string"}},
+                        "required": ["novel_id", "chapter"],
                     },
                 },
+                "asks_user": {"type": "boolean", "description": "answer 是向用户提出的问题、需要用户回答后才能继续时为 true", "default": False},
             },
             "required": ["answer"],
         },
@@ -139,16 +141,18 @@ class AgentLoop:
         memory: UserMemory | None = None,
         config: AgentConfig = AgentConfig(),
         model_name: str = "",
+        session: SessionState | None = None,
     ) -> None:
         self.model = model
         self.tools = tools
         self.memory = memory
         self.config = config
         self.model_name = model_name
+        self.session = session
 
     def run(self, user_message: str, history: list[dict[str, Any]] | None = None, task_id: str = "") -> AgentRun:
         budget = self.config.budget
-        messages: list[dict[str, Any]] = [{"role": "system", "content": build_system_prompt(self.memory, budget)}]
+        messages: list[dict[str, Any]] = [{"role": "system", "content": build_system_prompt(self.memory, budget, self.session)}]
         messages.extend(history or [])
         messages.append({"role": "user", "content": user_message})
         trajectory = Trajectory(task_id=task_id, model=self.model_name, user_message=user_message)
@@ -217,7 +221,10 @@ class AgentLoop:
                         trajectory.structured = {
                             "recommendations": list(call.arguments.get("recommendations") or []),
                             "citations": list(call.arguments.get("citations") or []),
+                            "asks_user": bool(call.arguments.get("asks_user") or False),
                         }
+                        if self.session is not None:
+                            self.session.note_recommendations(trajectory.structured["recommendations"])
                         finished = True
                 elif signature == last_signature:
                     observation.error = "重复调用：和上一次完全相同的工具和参数。"
@@ -225,6 +232,8 @@ class AgentLoop:
                 else:
                     try:
                         observation.result = self.tools.call(call.name, call.arguments)
+                        if self.session is not None and isinstance(observation.result, dict):
+                            self.session.note_rows(observation.result.get("results"))
                     except ToolError as exc:
                         observation.error = str(exc)
                     except Exception as exc:  # noqa: BLE001 - a tool bug must not kill the run

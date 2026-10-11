@@ -66,11 +66,13 @@ def test_search_books_applies_preview_budget_and_k_bounds() -> None:
     searcher = FakeSearcher()
     registry = ToolRegistry()
     registry.register(build_search_books(searcher, ContextBudget()))
-    rows = registry.call("search_books", {"query": "仙侠 慢热 不系统", "k": 3})
-    assert searcher.queries == [("仙侠 慢热", 3)]  # the negative never reaches the retriever
+    rows = registry.call("search_books", {"query": "主角理性的慢热仙侠，不要系统", "k": 3})["results"]
+    assert searcher.queries == [("主角理性的慢热仙侠，不要系统", 3)]  # verbatim: the agent owns the query wording (2026-10-11)
     assert len(rows) == 3
     assert len(rows[0]["preview"]) == ContextBudget().preview_chars
     assert set(rows[0]) == {"novel_id", "title", "preview", "score"}
+    with pytest.raises(ToolError, match="没有书卡"):
+        registry.call("search_books", {"query": "仙侠", "genre": "仙侠"})
     with pytest.raises(ToolError):
         registry.call("search_books", {"query": "仙侠", "k": 999})
     with pytest.raises(ToolError):
@@ -178,7 +180,7 @@ def test_redaction_strips_corpus_text_but_keeps_ids() -> None:
     assert observations[0]["result"]["novel_id"] == "n1"
     assert observations[1]["result"]["quotes"] == [text_fingerprint("原文引文")]
     assert observations[1]["result"]["verdict"] == "yes"
-    assert "sha256" in observations[2]["result"][0]["preview"]
+    assert "sha256" in observations[2]["result"]["results"][0]["preview"]
     assert observations[3]["result"] == {"violates": True}
     assert redacted["final_answer"] == text_fingerprint("引用了原文")
     dumped = json.dumps(redacted, ensure_ascii=False)
@@ -195,7 +197,7 @@ def test_search_books_prefers_the_synopsis_preview_from_profiles() -> None:
 
     registry = ToolRegistry()
     registry.register(build_search_books(FakeSearcher(), ContextBudget(), Profiles()))
-    rows = registry.call("search_books", {"query": "仙侠", "k": 2})
+    rows = registry.call("search_books", {"query": "仙侠", "k": 2})["results"]
     assert rows[0]["preview"] == "作者：某人\n凡人修仙的故事。"
     assert rows[1]["preview"].startswith("简介")  # unknown to the profile table: falls back to the stored preview
 

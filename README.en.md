@@ -15,7 +15,7 @@ raw text ──02──▶ digest (~40k chars per book: synopsis + 4 whole openi
                   ├──32──▶ book card (an LLM fills a closed three-layer vocabulary per book)
                   └──30──▶ multi-vector index (digest cut into ≤1,500-char paragraph chunks + the card, Qwen3-Embedding-4B)
                              └──33──▶ pooled single-vector index (the agent's default)
-agent (Qwen3.5-9B via Ollama) ──▶ search_books / get_profile / check_term / check_trope / memory_read / memory_write
+agent (a hosted API model; local Qwen3.5-9B as the comparison arm) ──▶ search_books / similar_books / get_profile / ask_book / check_term / check_trope / set_aside / memory_read / memory_write
 ```
 
 **Digest** (`src/digest.py`): a deterministic sample that stands in for a book of several
@@ -40,11 +40,22 @@ weighting. BM25 over jieba tokens and reciprocal-rank fusion are kept as referen
 configurations. Embeddings: Qwen3-Embedding-4B in bf16 (batch 8, 1,536-token cap on a
 16 GB card).
 
-**Agent** (`src/agent/`): an OpenAI-compatible tool-calling loop with six tools,
-single-user memory, a context budget with compaction of old results, and redacted
-structured trajectories. Negative constraints never reach the retriever: `search_books`
-takes positive features only, and the agent enforces negatives with `check_term` (a
-full-text term-density table) and `check_trope` (an LLM reading the text).
+**Agent** (`src/agent/`): an OpenAI-compatible tool-calling loop with nine tools plus
+`finish`, single-user long-term memory plus per-conversation session state, a context
+budget with compaction of old results, and redacted structured trajectories. Users talk in
+natural language; the agent writes the retrieval query itself and it reaches the embedder
+verbatim (no parsing, no term stripping). Finding books: `search_books` with hard filters
+from the book cards (`genre` / `elements` / `style`) when the user names them, and
+`exclude_shown` for "show me others"; `similar_books` searches with a book's own vector.
+Checking: negatives never reach the retriever; `check_term` (full-text term densities) and
+`check_trope` (card first, sampled text when the card is silent) verify candidates, and
+`get_profile` (card, synopsis, opening) answers positive preferences. In-book questions:
+`ask_book` retrieves passages within one book over its digest chapters (opening 4, middle 6,
+ending 2, chapter list), reusing the multi-vector index's chunk vectors through a memory map
+rather than building a new index, and answers cite chapter headings; what the digest does not
+cover is reported as such. Conversation: session state records what was recommended and set
+aside so "the second one" and "something else" resolve (`set_aside`); a request too vague to
+act on ends with a question (`asks_user`).
 
 ## Evaluation
 
@@ -83,9 +94,13 @@ Model calls read `INOVELREC_LLM_API_KEY` or `--api-key-file`; no credentials liv
 the repository. Development happens on a Mac; card building and index building run as
 scheduled tasks on a Windows machine with an RTX 4080.
 
-## Status (2026-10-10)
+## Status (2026-10-11)
 
-Digest v2 and card vocabulary v3.2 are final and the full card build is running; the 4B
-index (chunking, pooling, metadata) is implemented and will be rebuilt once the cards are
-done; the index-stage evaluation is being rebuilt. Passage-level RAG, question answering
-and the UI are phase two.
+Digest v2, book cards v3.2 (7,410 cards; 245 books rejected by the endpoint's content filter are
+left without one), the 4B multi-vector index (294,485 vectors including the card sections) and
+the pooled single-vector index are built; the agent defaults to `single_4b`. The agent layer has
+been reworked for natural-language conversation (card filters, similar books, session state,
+`ask_book`, question-style finish) and the main model moved to a hosted API, with the local 9B
+kept as a comparison arm. Neither the dev evaluation nor the index-stage candidate-supply
+evaluation has produced numbers yet. A build-on-demand full-book passage index, follow-up and
+clarification task types, and a UI are next.

@@ -14,7 +14,7 @@
                   │
                   └──30──▶ 多向量索引（digest 按段落切成 ≤1,500 字块 + 卡段，Qwen3-Embedding-4B）
                              └──33──▶ 池化单向量索引（agent 默认用这个）
-agent（Qwen3.5-9B，Ollama）──▶ search_books / get_profile / check_term / check_trope / memory_read / memory_write
+agent（API 模型为主，本地 Qwen3.5-9B 作对照）──▶ search_books / similar_books / get_profile / ask_book / check_term / check_trope / set_aside / memory_read / memory_write
 ```
 
 ### digest
@@ -43,8 +43,12 @@ digest 是书卡和索引共同的输入，版本号写进卡的缓存键和索�
 
 ### agent（`src/agent/`）
 
-OpenAI 兼容的 tool-calling loop，六个工具，单用户记忆，上下文预算与旧结果压缩，结构化轨迹并对原文脱敏。
-负向约束（「不要系统」「不要后宫」）不进检索：`search_books` 只收正向特征，agent 用 `check_term`（全文词频表）和 `check_trope`（LLM 读原文）在候选里核。
+OpenAI 兼容的 tool-calling loop，九个工具加 `finish`，单用户长期记忆加会话状态，上下文预算与旧结果压缩，结构化轨迹并对原文脱敏。用户用自然语言对话；查询措辞由 agent 自己写，原样进向量检索，不再经过任何解析或去词。
+
+- 找书：`search_books` 按自然语言描述检索，用户点名题材、元素、风格时用书卡做硬过滤（`genre` / `elements` / `style`），「换几本」用 `exclude_shown`；`similar_books` 用一本书自己的向量找相近的书。
+- 核查：负向约束不进检索，`check_term`（全文词频表）和 `check_trope`（先查书卡，卡上没有再读原文）在候选里核；正向偏好读 `get_profile`（书卡、简介、开头）。
+- 进书问答：`ask_book` 在一本书的 digest 章节（开头 4、中段 6、结尾 2 和目录）里做段落检索，向量直接从多向量索引里按书取（内存映射，不建新索引），回答带章节引用；覆盖之外的要如实说未收录。
+- 对话：会话状态记录已推荐、已排除的书，让「第二本」「换几本」「这本看过了」成立（`set_aside`）；需求太模糊时 `finish` 以提问结束（`asks_user`）。
 
 ## 评测
 
@@ -77,13 +81,16 @@ uv run python scripts/32_build_book_cards.py --model qwen3.8-flash --base-url <O
 uv run python scripts/30_build_book_indexes.py --dense multi --cards data/processed/book_cards_flash.parquet --dtype bf16 --batch-size 8
 #   书卡还没建好时：先不带 --cards 建，之后 scripts/30b_append_card_sections.py --index-dir <目录> 只嵌入书卡段并追加（平铺内积索引，结果与一起建相同）
 uv run python scripts/33_pool_single_from_multi.py --kind-mean
-uv run python scripts/chat.py                            # 需要本地 Ollama
+uv run python scripts/chat.py --model qwen3.7-plus --base-url <OpenAI 兼容地址> --api-key-file ~/.config/aliyun.key --no-thinking
+uv run python scripts/chat.py                            # 默认本地 Ollama qwen3.5:9b
+uv run python scripts/35_run_agent_eval.py --run-id dev-01 --tasks eval/agent/tasks/constrained_rec.jsonl --model qwen3.7-plus --base-url <地址> --api-key-file <key> --no-thinking --workers 8
 ```
 
 模型调用走 `INOVELREC_LLM_API_KEY` 或 `--api-key-file`，仓库里不含任何凭证。
 开发在 Mac，建卡与建索引等长任务在一台 RTX 4080 的 Windows 机器上以计划任务运行。
 
-## 现状（2026-10-10）
+## 现状（2026-10-11）
 
-digest v2 与书卡词表 v3.2 定稿，全量书卡在建；4B 索引的切块、池化与 metadata 已实现，等全量卡建完后重建；索引阶段的评测在改造。
-段落级 RAG（`ask_book`）、问答与追问任务、界面属于第二期。
+digest v2、书卡 v3.2（7,410 张，245 本被接口内容审核拒收、不补）、4B 多向量索引（294,485 向量，含书卡段）与池化单向量索引均已建成，agent 默认用 `single_4b`。
+agent 层按自然语言对话改造完毕（书卡过滤、相似书、会话状态、`ask_book`、提问式结束），主模型改为 API 模型，本地 9B 留作对照；dev 评测与索引阶段的候选供给评测尚未跑出数字。
+按需建全书段落索引、追问与澄清类评测任务、界面属于下一步。

@@ -258,16 +258,37 @@ class MultiVectorIndex:
     def book_count(self) -> int:
         return len(self.meta)
 
-    def search_vector(self, query_embedding: np.ndarray, k: int, oversample: int = 8) -> list[dict[str, Any]]:
-        """Top-k books by their best-matching section; ``oversample`` sections are fetched per book wanted."""
+    def rows_for(self, novel_id: str) -> list[int]:
+        """Row ids of this book's sections (built once, on first use)."""
+
+        if not hasattr(self, "_rows_by_novel"):
+            table: dict[str, list[int]] = {}
+            for row, record in enumerate(self.records):
+                table.setdefault(record.novel_id, []).append(row)
+            self._rows_by_novel = table
+        return self._rows_by_novel.get(str(novel_id), [])
+
+    def search_vector(self, query_embedding: np.ndarray, k: int, oversample: int = 8, allowed_ids: set[str] | None = None) -> list[dict[str, Any]]:
+        """Top-k books by their best-matching section; ``oversample`` sections are fetched per book wanted.
+        ``allowed_ids`` restricts the search to those books' sections (exact, via a FAISS id selector)."""
 
         if k <= 0 or self.index.ntotal == 0:
             return []
         vector = np.ascontiguousarray(query_embedding.reshape(1, -1), dtype=np.float32)
         if vector.shape[1] != self.index.d:
             raise ValueError(f"Query dim {vector.shape[1]} does not match index dim {self.index.d}")
-        fetch = min(max(k * oversample, k), self.index.ntotal)
-        scores, rows = self.index.search(vector, fetch)
+        if allowed_ids is None:
+            fetch = min(max(k * oversample, k), self.index.ntotal)
+            scores, rows = self.index.search(vector, fetch)
+        else:
+            import faiss
+
+            allowed_rows = [row for novel_id in allowed_ids for row in self.rows_for(novel_id)]
+            if not allowed_rows:
+                return []
+            fetch = min(max(k * oversample, k), len(allowed_rows))
+            params = faiss.SearchParameters(sel=faiss.IDSelectorBatch(np.asarray(allowed_rows, dtype=np.int64)))
+            scores, rows = self.index.search(vector, fetch, params=params)
         best: dict[str, dict[str, Any]] = {}
         for score, row in zip(scores[0], rows[0]):
             if row < 0:

@@ -41,11 +41,17 @@ def tool_calls(trajectory: Mapping[str, Any], name: str) -> list[dict[str, Any]]
 
 
 def searched_ids(trajectory: Mapping[str, Any]) -> set[str]:
+    """novel_ids any search tool put in front of the model (search_books, similar_books; list or {"results": [...]})."""
+
     ids: set[str] = set()
     for step in trajectory.get("steps", []):
         for obs in step.get("observations", []):
-            if obs.get("tool") == "search_books" and isinstance(obs.get("result"), list):
-                ids.update(str(r.get("novel_id", "")) for r in obs["result"] if isinstance(r, Mapping))
+            if obs.get("tool") not in ("search_books", "similar_books"):
+                continue
+            result = obs.get("result")
+            rows = result.get("results") if isinstance(result, Mapping) else result
+            if isinstance(rows, list):
+                ids.update(str(r.get("novel_id", "")) for r in rows if isinstance(r, Mapping))
     return ids
 
 

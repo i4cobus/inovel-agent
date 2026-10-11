@@ -16,13 +16,17 @@ from typing import Mapping, Any, Callable
 from src.agent.context import ContextBudget
 from src.agent.loop import AgentConfig, AgentLoop
 from src.agent.memory import DEFAULT_MEMORY_PATH, UserMemory
+from src.agent.session import SessionState
 from src.agent.tools import (
     ToolRegistry,
+    build_ask_book,
     build_check_term,
     build_check_trope,
     build_get_profile,
     build_memory_tools,
     build_search_books,
+    build_set_aside,
+    build_similar_books,
 )
 from src.agent.trope import CachedTropeJudge
 from src.chat_transport import HTTPChatTransport
@@ -44,13 +48,28 @@ class ParquetProfiles:
     given). An old profile table without ``sections_json`` keeps its text head as ``profile``.
     """
 
-    def __init__(self, rows: dict[str, dict[str, str]], digest_version: str | None = None, cards: int = 0) -> None:
+    def __init__(self, rows: dict[str, dict[str, str]], digest_version: str | None = None, cards: int = 0, sections_json: dict[str, str] | None = None) -> None:
         self.rows = rows
         self.digest_version = digest_version
         self.cards = cards
+        # Raw sections_json per book (~0.6 GB for digest_v2), kept only when ask_book needs it; parsed on demand.
+        self.sections_json = sections_json or {}
+
+    def sections(self, novel_id: str) -> list[dict[str, str]] | None:
+        import json
+
+        raw = self.sections_json.get(str(novel_id))
+        return json.loads(raw) if raw else None
 
     @classmethod
-    def load(cls, path: Path = DEFAULT_PROFILES_PATH, cards_path: Path | None = None, keep_chars: int = 3000, cards: Mapping[str, Any] | None = None) -> "ParquetProfiles":
+    def load(
+        cls,
+        path: Path = DEFAULT_PROFILES_PATH,
+        cards_path: Path | None = None,
+        keep_chars: int = 3000,
+        cards: Mapping[str, Any] | None = None,
+        keep_sections: bool = False,
+    ) -> "ParquetProfiles":
         import json
 
         import pyarrow.parquet as pq
@@ -67,12 +86,15 @@ class ParquetProfiles:
             cards = load_cards(cards_path)
         card_texts = {novel_id: card.text() for novel_id, card in (cards or {}).items()}
         rows: dict[str, dict[str, str]] = {}
+        kept: dict[str, str] = {}
         versions: set[str] = set()
         for batch in pq.ParquetFile(path).iter_batches(batch_size=256, columns=columns):
             for record in batch.to_pylist():
                 novel_id = str(record["novel_id"])
                 blurb, opening = "", ""
                 if record.get("sections_json"):
+                    if keep_sections:
+                        kept[novel_id] = str(record["sections_json"])
                     sections = json.loads(str(record["sections_json"]))
                     blurb = next((str(s["text"]) for s in sections if s.get("kind") == "blurb"), "")
                     opening = "\n\n".join(str(s["text"]) for s in sections if s.get("kind") == "opening")
@@ -80,7 +102,7 @@ class ParquetProfiles:
                 rows[novel_id] = {"title": str(record.get("title_guess") or ""), "profile": profile, "blurb": blurb, "card": card_texts.get(novel_id, "")}
                 if record.get("digest_version"):
                     versions.add(str(record["digest_version"]))
-        return cls(rows, digest_version=next(iter(versions)) if len(versions) == 1 else None, cards=sum(1 for r in rows.values() if r["card"]))
+        return cls(rows, digest_version=next(iter(versions)) if len(versions) == 1 else None, cards=sum(1 for r in rows.values() if r["card"]), sections_json=kept)
 
     def get(self, novel_id: str) -> dict[str, str] | None:
         return self.rows.get(novel_id)
@@ -148,24 +170,58 @@ class AgentBundle:
     memory_path: Path
     turn: int = 0
     info: dict[str, Any] = field(default_factory=dict)
+    session: SessionState = field(default_factory=SessionState)
+    # Everything heavy, shared by forks: searcher, profiles, densities, judge, transport, passages, catalog.
+    backends: dict[str, Any] = field(default_factory=dict)
+    config: AgentConfig = AgentConfig()
+    budget: ContextBudget = ContextBudget()
 
     def reset_memory(self, memory_path: Path) -> None:
-        """Point the agent at a fresh memory file (one per evaluation task) without reloading anything else."""
-
-        from src.agent.tools import build_memory_tools
+        """Point the agent at a fresh memory file and an empty session (one per evaluation task)."""
 
         self.memory = UserMemory.load(memory_path)
         self.memory_path = memory_path
         self.turn = 0
-        for spec in build_memory_tools(self.memory, turn_counter=lambda: self.turn):
-            self.tools.specs[spec.name] = spec
-        self.loop.memory = self.memory
+        self.session = SessionState()
+        self.tools = assemble_tools(self.backends, self.memory, self.session, self.budget, turn_counter=lambda: self.turn)
+        self.loop = AgentLoop(self.backends["transport"], self.tools, self.memory, config=self.config, model_name=self.info.get("model", ""), session=self.session)
+
+    def fork(self, memory_path: Path) -> "AgentBundle":
+        """An independent agent over the same backends: its own memory, session, tools and loop. Safe to run in a thread."""
+
+        child = AgentBundle(loop=self.loop, tools=self.tools, memory=self.memory, memory_path=memory_path, info=dict(self.info), backends=self.backends, config=self.config, budget=self.budget)
+        child.reset_memory(memory_path)
+        return child
 
     def chat(self, user_message: str, history: list[dict[str, Any]] | None = None, task_id: str = "") -> Any:
         self.turn += 1
+        self.session.turn = self.turn
         run = self.loop.run(user_message, history=history, task_id=task_id)
         self.memory.save(self.memory_path)
         return run
+
+
+def assemble_tools(backends: Mapping[str, Any], memory: UserMemory, session: SessionState, budget: ContextBudget, turn_counter: Callable[[], int] = lambda: 0) -> ToolRegistry:
+    """The tool set over loaded backends. Tests call this with stubs; build_agent with artifacts."""
+
+    tools = ToolRegistry()
+    searcher, profiles, catalog = backends["searcher"], backends.get("profiles"), backends.get("catalog")
+    tools.register(build_search_books(searcher, budget, profiles, catalog=catalog, session=session))
+    similar = build_similar_books(searcher, budget, profiles, catalog=catalog, session=session)
+    if similar is not None:
+        tools.register(similar)
+    if profiles is not None:
+        tools.register(build_get_profile(profiles, budget))
+    if backends.get("densities") is not None:
+        tools.register(build_check_term(backends["densities"]))
+    if backends.get("judge") is not None:
+        tools.register(build_check_trope(backends["judge"]))
+    if backends.get("passages") is not None:
+        tools.register(build_ask_book(backends["passages"], budget, profiles))
+    tools.register(build_set_aside(session, profiles))
+    for spec in build_memory_tools(memory, turn_counter=turn_counter):
+        tools.register(spec)
+    return tools
 
 
 def build_agent(
@@ -181,11 +237,19 @@ def build_agent(
     embedding_dtype: str | None = None,
     trope_model: str | None = None,
     reasoning_effort: str | None = None,
+    api_key: str | None = None,
+    extra_body: Mapping[str, Any] | None = None,
+    multi_dir: Path | None = None,
+    passages: bool = True,
     config: AgentConfig = AgentConfig(),
     budget: ContextBudget = ContextBudget(),
     embedder_factory: Callable[..., Any] | None = None,
 ) -> AgentBundle:
-    """Load every artifact and return a ready agent. Slow: loads the embedder."""
+    """Load every artifact and return a ready agent. Slow: loads the embedder.
+
+    ``api_key`` / ``extra_body`` are for a hosted OpenAI-compatible endpoint (百炼: ``{"enable_thinking": false}``);
+    ``multi_dir`` is the multi-vector index whose chunk vectors ``ask_book`` reuses (default: the sibling
+    ``multi_*`` of ``index_dir`` when it exists; otherwise chunks are embedded on the fly)."""
 
     from src.embed import load_embedding_model
     from src.retrieval.hybrid import index_metadata, load_searchers
@@ -200,25 +264,37 @@ def build_agent(
         from src.retrieval.cards import load_cards
 
         cards = load_cards(cards_path)
-    profiles = ParquetProfiles.load(profiles_path, cards=cards)
+    from src.retrieval.catalog import CardCatalog
+
+    catalog = CardCatalog(cards) if cards else None
+    profiles = ParquetProfiles.load(profiles_path, cards=cards, keep_sections=passages)
     densities = load_density_table(density_path)
     memory = UserMemory.load(memory_path)
-    transport = HTTPChatTransport(model=model, base_url=base_url, reasoning_effort=reasoning_effort)
-    trope_transport = HTTPChatTransport(model=trope_model or model, base_url=base_url, reasoning_effort=reasoning_effort)
+    body = dict(extra_body or {})
+    transport = HTTPChatTransport(model=model, base_url=base_url, reasoning_effort=reasoning_effort, api_key=api_key, extra_body=dict(body))
+    trope_transport = HTTPChatTransport(model=trope_model or model, base_url=base_url, reasoning_effort=reasoning_effort, api_key=api_key, extra_body=dict(body))
     judge = CachedTropeJudge(trope_transport, LazyRawText(inventory_path), model_name=trope_model or model, cards=cards)
 
-    bundle = AgentBundle(loop=None, tools=ToolRegistry(), memory=memory, memory_path=memory_path)  # type: ignore[arg-type]
-    bundle.tools.register(build_search_books(searcher, budget, profiles))
-    bundle.tools.register(build_get_profile(profiles, budget))
-    bundle.tools.register(build_check_term(densities))
-    bundle.tools.register(build_check_trope(judge))
-    for spec in build_memory_tools(memory, turn_counter=lambda: bundle.turn):
-        bundle.tools.register(spec)
-    bundle.loop = AgentLoop(transport, bundle.tools, memory, config=config, model_name=model)
+    passage_backend = None
+    if passages and profiles.sections_json:
+        from src.agent.passages import DigestPassages
+
+        if multi_dir is None:
+            candidate = index_dir.parent / index_dir.name.replace("single", "multi")
+            multi_dir = candidate if candidate != index_dir and candidate.exists() else None
+        passage_backend = DigestPassages(profiles, embedder, multi_dir=multi_dir, chunk_chars=metadata.get("chunk_chars") or None)
+
+    backends = {"searcher": searcher, "profiles": profiles, "catalog": catalog, "densities": densities, "judge": judge, "passages": passage_backend, "transport": transport}
+    session = SessionState()
+    tools = assemble_tools(backends, memory, session, budget)
+    bundle = AgentBundle(loop=None, tools=tools, memory=memory, memory_path=memory_path, backends=backends, config=config, budget=budget, session=session)  # type: ignore[arg-type]
+    bundle.tools = assemble_tools(backends, memory, session, budget, turn_counter=lambda: bundle.turn)
+    bundle.loop = AgentLoop(transport, bundle.tools, memory, config=config, model_name=model, session=session)
     bundle.info = {
         "model": model,
         "base_url": base_url,
         "reasoning_effort": reasoning_effort,
+        "extra_body": body,
         "index_dir": index_dir.as_posix(),
         "searcher": searcher.name,
         "profiles": len(profiles),
@@ -226,6 +302,8 @@ def build_agent(
         "digest_version": profiles.digest_version,
         "index_digest_version": metadata.get("digest_version"),
         "density_rows": len(densities),
+        "passages": passage_backend.source if passage_backend is not None else None,
+        "tools": sorted(bundle.tools.specs),
     }
     if metadata.get("digest_version") and profiles.digest_version and metadata["digest_version"] != profiles.digest_version:
         bundle.info["warning"] = f"index built from {metadata['digest_version']} but profiles are {profiles.digest_version}"

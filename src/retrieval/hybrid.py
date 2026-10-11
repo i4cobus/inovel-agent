@@ -10,7 +10,10 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Iterable, Protocol
+
+import faiss
+import numpy as np
 
 from src.config import DEFAULT_INDEX_DIR
 
@@ -27,18 +30,54 @@ class BookSearcher(Protocol):
     def search(self, query: str, k: int) -> list[dict[str, Any]]: ...
 
 
+def id_selector(rows: Iterable[int]) -> Any:
+    """A FAISS search parameter restricting the search to these row ids (exact on a flat index)."""
+
+    return faiss.SearchParameters(sel=faiss.IDSelectorBatch(np.fromiter(rows, dtype=np.int64)))
+
+
 class SingleVectorSearcher:
-    """The v1 index: one vector per book."""
+    """One vector per book (v1 whole-digest encoding, or the pooled multi-vector index)."""
 
     def __init__(self, model: SupportsEncode, index: Any, id_map: dict[int, dict[str, str]], name: str = "dense_single") -> None:
         self.model, self.index, self.id_map, self.name = model, index, id_map, name
+        self.rows_by_novel: dict[str, int] = {str(meta.get("novel_id", "")): row for row, meta in id_map.items()}
 
     @classmethod
     def load(cls, model: SupportsEncode, directory: Path, name: str = "dense_single") -> "SingleVectorSearcher":
         return cls(model, load_faiss_index(directory / "faiss.index"), load_id_map(directory / "novel_id_map.json"), name)
 
-    def search(self, query: str, k: int) -> list[dict[str, Any]]:
-        return semantic_search(query, self.model, self.index, self.id_map, top_k=k)
+    def search(self, query: str, k: int, allowed_ids: set[str] | None = None) -> list[dict[str, Any]]:
+        if allowed_ids is None:
+            return semantic_search(query, self.model, self.index, self.id_map, top_k=k)
+        query = query.strip()
+        if not query or k <= 0:
+            return []
+        vector = encode_queries(self.model, [query], batch_size=1, normalize_embeddings=True)
+        return self._search_vector(vector, k, allowed_ids)
+
+    def similar(self, novel_id: str, k: int, allowed_ids: set[str] | None = None) -> list[dict[str, Any]]:
+        """Books nearest to this book's own vector, the book itself left out."""
+
+        row = self.rows_by_novel.get(str(novel_id))
+        if row is None:
+            return []
+        vector = self.index.reconstruct(int(row)).reshape(1, -1)
+        allowed = (allowed_ids if allowed_ids is not None else set(self.rows_by_novel)) - {str(novel_id)}
+        return self._search_vector(vector, k, allowed)
+
+    def _search_vector(self, vector: np.ndarray, k: int, allowed_ids: set[str]) -> list[dict[str, Any]]:
+        rows = [self.rows_by_novel[n] for n in allowed_ids if n in self.rows_by_novel]
+        if not rows or k <= 0:
+            return []
+        scores, ids = self.index.search(np.ascontiguousarray(vector, dtype=np.float32), min(k, len(rows)), params=id_selector(rows))
+        out: list[dict[str, Any]] = []
+        for score, faiss_id in zip(scores[0], ids[0]):
+            meta = self.id_map.get(int(faiss_id))
+            if faiss_id < 0 or meta is None:
+                continue
+            out.append({"rank": len(out) + 1, "score": float(score), "novel_id": meta.get("novel_id", ""), "title_guess": meta.get("title_guess", ""), "profile_text_preview": meta.get("profile_text_preview", "")})
+        return out
 
 
 class MultiVectorSearcher:
@@ -49,12 +88,12 @@ class MultiVectorSearcher:
     def load(cls, model: SupportsEncode, directory: Path, name: str = "dense_multi") -> "MultiVectorSearcher":
         return cls(model, MultiVectorIndex.load(directory), name)
 
-    def search(self, query: str, k: int) -> list[dict[str, Any]]:
+    def search(self, query: str, k: int, allowed_ids: set[str] | None = None) -> list[dict[str, Any]]:
         query = query.strip()
         if not query or k <= 0:
             return []
         vector = encode_queries(self.model, [query], batch_size=1, normalize_embeddings=True, show_progress_bar=False)
-        return self.index.search_vector(vector[0], k, oversample=self.oversample)
+        return self.index.search_vector(vector[0], k, oversample=self.oversample, allowed_ids=allowed_ids)
 
 
 class BM25Searcher:

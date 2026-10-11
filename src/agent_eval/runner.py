@@ -9,7 +9,9 @@ the redacted copies go next to the summary for committing.
 from __future__ import annotations
 
 import json
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +30,9 @@ class TaskAgent(Protocol):
     def reset_memory(self, memory_path: Path) -> None: ...
 
     def chat(self, user_message: str, history: list[dict[str, Any]] | None = None, task_id: str = "") -> Any: ...
+
+    # Optional: ``fork(memory_path)`` returns an independent agent over the same backends; with it the
+    # runner can drive several tasks at once against a hosted model.
 
 
 @dataclass
@@ -54,34 +59,43 @@ def run_tasks(
     paths: RunPaths,
     config: dict[str, Any],
     on_task: Callable[[Task, list[dict[str, Any]]], None] | None = None,
+    workers: int = 1,
 ) -> list[dict[str, Any]]:
-    """Run every task; return one record per task with its trajectories and memory states."""
+    """Run every task; return one record per task (in task order) with its trajectories and memory states.
+
+    ``workers`` > 1 runs tasks concurrently, each on ``agent.fork(memory_path)``; sessions within a task
+    stay sequential because they share memory."""
 
     paths.run_dir.mkdir(parents=True, exist_ok=True)
     paths.local_dir.mkdir(parents=True, exist_ok=True)
     paths.memory_dir.mkdir(parents=True, exist_ok=True)
     (paths.run_dir / "config.json").write_text(
-        json.dumps({**config, "started_at": datetime.now(timezone.utc).isoformat(), "tasks": len(tasks)}, ensure_ascii=False, indent=2),
+        json.dumps({**config, "started_at": datetime.now(timezone.utc).isoformat(), "tasks": len(tasks), "workers": workers}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     redactors = agent.tools.redactors()
-    records: list[dict[str, Any]] = []
-    for task in tasks:
+    lock = threading.Lock()
+    can_fork = workers > 1 and hasattr(agent, "fork")
+
+    def run_one(task: Task) -> dict[str, Any]:
         memory_path = paths.memory_dir / f"{task.task_id}.json"
         if memory_path.exists():
             memory_path.unlink()
-        agent.reset_memory(memory_path)
+        worker = agent.fork(memory_path) if can_fork else agent
+        if not can_fork:
+            worker.reset_memory(memory_path)
         trajectories: list[dict[str, Any]] = []
         memory_states: list[dict[str, Any]] = []
         started = time.perf_counter()
         for index, session in enumerate(task.sessions):
-            run = agent.chat(session.user_message, history=None, task_id=f"{task.task_id}/s{index}")
+            run = worker.chat(session.user_message, history=None, task_id=f"{task.task_id}/s{index}")
             trajectory = run.trajectory
             trajectory.metadata.update({"task_id": task.task_id, "session": index, "kind": task.kind, "variant": task.variant})
             trajectories.append(trajectory.to_dict())
-            memory_states.append(agent.memory.to_dict())
-            append_jsonl(paths.full_path, trajectory.to_dict())
-            append_jsonl(paths.redacted_path, trajectory.redacted(redactors))
+            memory_states.append(worker.memory.to_dict())
+            with lock:
+                append_jsonl(paths.full_path, trajectory.to_dict())
+                append_jsonl(paths.redacted_path, trajectory.redacted(redactors))
         record = {
             "task_id": task.task_id,
             "kind": task.kind,
@@ -91,11 +105,16 @@ def run_tasks(
             "trajectories": trajectories,
             "memory_states": memory_states,
         }
-        append_jsonl(paths.run_dir / "memory_states.jsonl", {"task_id": task.task_id, "memory_states": memory_states})
-        records.append(record)
-        if on_task is not None:
-            on_task(task, trajectories)
-    return records
+        with lock:
+            append_jsonl(paths.run_dir / "memory_states.jsonl", {"task_id": task.task_id, "memory_states": memory_states})
+            if on_task is not None:
+                on_task(task, trajectories)
+        return record
+
+    if can_fork:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return list(pool.map(run_one, tasks))
+    return [run_one(task) for task in tasks]
 
 
 def load_run(paths: RunPaths) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:

@@ -17,9 +17,10 @@ from typing import Any, Callable, Mapping, Protocol
 
 from src.agent.context import ContextBudget, truncate
 from src.agent.memory import MEMORY_KINDS, UserMemory
+from src.agent.session import SessionState
 from src.agent.trajectory import text_fingerprint
 from src.preferences import constraint_violation_from_densities, is_rule_checkable, merged_density_from_table
-from src.retrieval.query import retrieval_query
+from src.retrieval.catalog import CardCatalog, CardFilter, FilterError, filter_options_text
 
 
 class ToolError(Exception):
@@ -76,7 +77,15 @@ class ToolRegistry:
 
 class BookSearcher(Protocol):
     def search(self, query: str, k: int) -> list[dict[str, Any]]:
-        """Return ranked rows with novel_id, title_guess, profile_text_preview, score."""
+        """Return ranked rows with novel_id, title_guess, profile_text_preview, score.
+
+        Real searchers also accept ``allowed_ids`` (a set of novel_ids to search within) and the single-vector
+        one has ``similar(novel_id, k, allowed_ids)``; the tools use those only when a filter is given."""
+
+
+class PassageBackend(Protocol):
+    def ask(self, novel_id: str, question: str, k: int = 3) -> dict[str, Any] | None:
+        """{"coverage": str, "passages": [Passage], "source": str} or None when the book is unknown."""
 
 
 class ProfileLookup(Protocol):
@@ -92,8 +101,16 @@ class TropeJudge(Protocol):
 # ---- tool builders --------------------------------------------------------------------------
 
 
-def build_search_books(searcher: BookSearcher, budget: ContextBudget, profiles: ProfileLookup | None = None) -> ToolSpec:
-    """``profiles`` lets the preview be the synopsis even when the index's stored preview is the raw profile head."""
+def build_search_books(
+    searcher: BookSearcher,
+    budget: ContextBudget,
+    profiles: ProfileLookup | None = None,
+    catalog: CardCatalog | None = None,
+    session: SessionState | None = None,
+) -> ToolSpec:
+    """``profiles`` lets the preview be the synopsis even when the index's stored preview is the raw profile head.
+    ``catalog`` (the book cards) enables the genre / elements / style filters and the per-row 题材 label;
+    ``session`` enables ``exclude_shown``."""
 
     from src.retrieval.multivector import synopsis_preview
 
@@ -104,41 +121,204 @@ def build_search_books(searcher: BookSearcher, budget: ContextBudget, profiles: 
                 return synopsis_preview(full.get("blurb") or full["profile"], budget.preview_chars)
         return truncate(str(row.get("profile_text_preview", "")), budget.preview_chars)
 
-    def handler(query: str, k: int = 10) -> list[dict[str, Any]]:
+    def handler(query: str, k: int = 10, genre: str | None = None, elements: list[str] | None = None, style: list[str] | None = None, exclude_shown: bool = False) -> dict[str, Any]:
         query = str(query).strip()
         if not query:
             raise ToolError("query 不能为空")
         k = int(k)
         if k < 1 or k > budget.max_search_k:
             raise ToolError(f"k 必须在 1 到 {budget.max_search_k} 之间")
-        # Negatives never reach the embedder; the agent enforces them with check_term / check_trope.
-        rows = searcher.search(retrieval_query(query), k)
-        return [
-            {
-                "novel_id": str(row.get("novel_id", "")),
-                "title": str(row.get("title_guess", "")),
-                "preview": preview_for(row),
-                "score": round(float(row.get("score", 0.0)), 4),
-            }
-            for row in rows
-        ]
+        try:
+            spec = CardFilter.parse(genre, elements, style)
+        except FilterError as exc:
+            raise ToolError(str(exc)) from exc
+        allowed: set[str] | None = None
+        if not spec.empty:
+            if catalog is None:
+                raise ToolError("这个书库没有书卡，不能按 genre / elements / style 过滤；去掉过滤条件，把特征写进 query。")
+            allowed = catalog.select(spec)
+            if not allowed:
+                raise ToolError(f"没有书卡同时满足 {spec.describe()}；放宽条件再搜。")
+        avoid = session.avoid() if (exclude_shown and session is not None) else set()
+        if allowed is not None and avoid:
+            allowed = allowed - avoid
+            if not allowed:
+                raise ToolError("排除已推荐的书后没有候选了；放宽过滤条件。")
+        # The query reaches the embedder as the agent wrote it: no parsing, no term stripping (dropped 2026-10-11).
+        if allowed is not None:
+            rows = searcher.search(query, k, allowed_ids=allowed)
+        else:
+            rows = searcher.search(query, k + len(avoid))
+            if avoid:
+                rows = [row for row in rows if str(row.get("novel_id", "")) not in avoid][:k]
+        out = []
+        for row in rows:
+            novel_id = str(row.get("novel_id", ""))
+            item = {"novel_id": novel_id, "title": str(row.get("title_guess", "")), "preview": preview_for(row), "score": round(float(row.get("score", 0.0)), 4)}
+            if catalog is not None:
+                item["genre"] = catalog.label(novel_id)
+            out.append(item)
+        result: dict[str, Any] = {"results": out}
+        if not spec.empty:
+            result["filter"] = spec.describe()
+            result["filter_matches"] = len(allowed or ())
+        if avoid:
+            result["excluded"] = len(avoid)
+        return result
 
     def redact(result: Any) -> Any:
-        return [{**row, "preview": text_fingerprint(row.get("preview", ""))} for row in result]
+        if isinstance(result, dict) and isinstance(result.get("results"), list):
+            return {**result, "results": [{**row, "preview": text_fingerprint(row.get("preview", ""))} for row in result["results"]]}
+        return result
 
+    filters = filter_options_text() if catalog is not None else "这个书库没有书卡，genre / elements / style 不可用。"
     return ToolSpec(
         name="search_books",
-        description="按描述检索书库，返回候选书的 novel_id、书名、简介片段和相似度。只写想要的特征，不要写「不要……」：负向约束检索不认，要用 check_term / check_trope 核查。换不同措辞可以多搜几次。",
+        description=(
+            "按描述在书库里找书，返回候选的 novel_id、书名、题材、简介片段和相似度。query 是对想要的书的正面描述，用自然语言写清题材、"
+            "设定、主角、节奏、基调即可，不要写否定（「不要系统」检索不认，负向条件要在拿到候选后用 check_term / check_trope 核查）。"
+            "genre / elements / style 是按书卡做的硬过滤，用户点名了题材、元素或风格时优先用它们而不是靠措辞；没有书卡的书会被过滤掉。"
+            "exclude_shown=true 跳过本次对话已推荐和用户已排除的书（用户说「换几本」时用）。换不同描述可以多搜几次。" + filters
+        ),
         parameters={
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "想找的书的描述，例如：凡人流 仙侠 慢热 宗门"},
+                "query": {"type": "string", "description": "想找的书的描述，自然语言，例如：主角是凡人出身的修仙故事，节奏慢，重宗门生活和炼丹"},
                 "k": {"type": "integer", "description": f"返回条数，1 到 {budget.max_search_k}", "default": 10},
+                "genre": {"type": "string", "description": "题材一级或二级，例如 仙侠 / 幻想修仙"},
+                "elements": {"type": "array", "items": {"type": "string"}, "description": "必须具备的元素，例如 [\"系统\", \"穿越\"]"},
+                "style": {"type": "array", "items": {"type": "string"}, "description": "风格档位，写「维度=档」，例如 [\"爽度=低\", \"感情线=无\"]"},
+                "exclude_shown": {"type": "boolean", "default": False},
             },
             "required": ["query"],
         },
         handler=handler,
         redact=redact,
+    )
+
+
+def build_similar_books(searcher: Any, budget: ContextBudget, profiles: ProfileLookup | None = None, catalog: CardCatalog | None = None, session: SessionState | None = None) -> ToolSpec | None:
+    """「类似某本书的」: the anchor book's own vector against the index. None when the searcher cannot do it."""
+
+    if not hasattr(searcher, "similar"):
+        return None
+    from src.retrieval.multivector import synopsis_preview
+
+    def handler(novel_id: str, k: int = 10, exclude_shown: bool = False) -> dict[str, Any]:
+        novel_id = str(novel_id).strip()
+        k = int(k)
+        if k < 1 or k > budget.max_search_k:
+            raise ToolError(f"k 必须在 1 到 {budget.max_search_k} 之间")
+        avoid = session.avoid() if (exclude_shown and session is not None) else set()
+        rows = searcher.similar(novel_id, k + len(avoid))
+        if avoid:
+            rows = [row for row in rows if str(row.get("novel_id", "")) not in avoid][:k]
+        if not rows and (profiles is None or profiles.get(novel_id) is None):
+            raise ToolError(f"没有这本书：{novel_id}。先用 search_books 按书名找到它的 novel_id。")
+        out = []
+        for row in rows:
+            nid = str(row.get("novel_id", ""))
+            full = profiles.get(nid) if profiles is not None else None
+            preview = synopsis_preview(full.get("blurb") or full.get("profile", ""), budget.preview_chars) if full else truncate(str(row.get("profile_text_preview", "")), budget.preview_chars)
+            item = {"novel_id": nid, "title": str(row.get("title_guess", "")), "preview": preview, "score": round(float(row.get("score", 0.0)), 4)}
+            if catalog is not None:
+                item["genre"] = catalog.label(nid)
+            out.append(item)
+        return {"anchor": novel_id, "results": out}
+
+    def redact(result: Any) -> Any:
+        if isinstance(result, dict) and isinstance(result.get("results"), list):
+            return {**result, "results": [{**row, "preview": text_fingerprint(row.get("preview", ""))} for row in result["results"]]}
+        return result
+
+    return ToolSpec(
+        name="similar_books",
+        description="找和某一本书整体最相近的书（题材、设定、写法），用于「类似某某的」或「和刚才那本差不多的」。要先有那本书的 novel_id：用户报书名时先 search_books 书名。相近只是整体相似，用户的具体约束仍要核查。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "novel_id": {"type": "string"},
+                "k": {"type": "integer", "default": 10},
+                "exclude_shown": {"type": "boolean", "default": False},
+            },
+            "required": ["novel_id"],
+        },
+        handler=handler,
+        redact=redact,
+    )
+
+
+def build_ask_book(passages: PassageBackend, budget: ContextBudget, profiles: ProfileLookup | None = None) -> ToolSpec:
+    def handler(novel_id: str, question: str, k: int = 3) -> dict[str, Any]:
+        novel_id = str(novel_id).strip()
+        question = str(question).strip()
+        if not question:
+            raise ToolError("question 不能为空")
+        k = int(k)
+        if k < 1 or k > budget.max_passages:
+            raise ToolError(f"k 必须在 1 到 {budget.max_passages} 之间")
+        found = passages.ask(novel_id, question, k)
+        if found is None:
+            raise ToolError(f"没有这本书：{novel_id}")
+        title = ""
+        if profiles is not None:
+            row = profiles.get(novel_id)
+            title = row.get("title", "") if row else ""
+        return {
+            "novel_id": novel_id,
+            "title": title,
+            "coverage": found["coverage"],
+            "passages": [
+                {"chapter": p.heading, "kind": p.kind, "text": truncate(p.text, budget.passage_chars), "score": round(p.score, 4)} for p in found["passages"]
+            ],
+            "note": "只检索了 coverage 里列出的章节；如果这些段落答不了问题，就告诉用户摘要未收录相关章节，不要推测。",
+        }
+
+    def redact(result: Any) -> Any:
+        if isinstance(result, dict) and isinstance(result.get("passages"), list):
+            return {**result, "passages": [{**p, "text": text_fingerprint(str(p.get("text", "")))} for p in result["passages"]]}
+        return result
+
+    return ToolSpec(
+        name="ask_book",
+        description=(
+            "在一本书的摘要章节里找和问题相关的段落（返回章节标题和原文片段），用来回答关于这本书情节、设定、主角、结局的问题。"
+            "能查到的只有这本书的开头几章、中段几章、结尾几章和章节目录（结果里的 coverage 会列出），不是全书：开头类问题（设定、金手指、主角来路）和结局类问题通常答得了，"
+            "中段具体情节多半答不了，答不了就如实说摘要未收录。回答时在 finish 的 citations 里填用到的 novel_id 和 chapter。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "novel_id": {"type": "string"},
+                "question": {"type": "string", "description": "要在书里找什么，自然语言"},
+                "k": {"type": "integer", "description": f"返回段落数，1 到 {budget.max_passages}", "default": 3},
+            },
+            "required": ["novel_id", "question"],
+        },
+        handler=handler,
+        redact=redact,
+    )
+
+
+def build_set_aside(session: SessionState, profiles: ProfileLookup | None = None) -> ToolSpec:
+    def handler(novel_ids: list[str], reason: str = "") -> dict[str, Any]:
+        if not isinstance(novel_ids, list) or not novel_ids:
+            raise ToolError("novel_ids 必须是非空列表")
+        added = session.exclude(novel_ids)
+        return {"excluded": added, "total_excluded": len(session.excluded), "note": "之后 search_books / similar_books 用 exclude_shown=true 就不会再返回这些书。长期不想看的类型请另用 memory_write。"}
+
+    return ToolSpec(
+        name="set_aside",
+        description="把用户本次对话里不要的书记下来（看过了、没兴趣、刚推荐的不满意），之后带 exclude_shown=true 搜索会跳过它们。只对本次对话有效。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "novel_ids": {"type": "array", "items": {"type": "string"}},
+                "reason": {"type": "string", "description": "用户的原话或原因，可省略"},
+            },
+            "required": ["novel_ids"],
+        },
+        handler=handler,
     )
 
 

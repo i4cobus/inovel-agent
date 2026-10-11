@@ -37,8 +37,15 @@ def main(
     show_steps: bool = typer.Option(True, "--show-steps/--quiet"),
     trajectories: Path = typer.Option(DATA_DIR / "trajectories" / "chat.jsonl"),
     once: str | None = typer.Option(None, help="Ask one question and exit (for smoke tests)."),
+    api_key_file: Path | None = typer.Option(None, help="File holding the endpoint's API key (hosted models); else INOVELREC_LLM_API_KEY."),
+    no_thinking: bool = typer.Option(False, help="Send enable_thinking=false (百炼 Qwen3.x) and reasoning_effort=none (Ollama)."),
+    multi_dir: Path | None = typer.Option(None, help="Multi-vector index whose chunk vectors ask_book reuses; default: the sibling multi_* of --index-dir."),
 ) -> None:
-    agent = build_agent(model=model, base_url=base_url, index_dir=index_dir, cards_path=cards, device=device, reasoning_effort=reasoning_effort, config=AgentConfig(max_steps=max_steps))
+    api_key = api_key_file.read_text(encoding="utf-8").strip() if api_key_file else None
+    extra_body = {"enable_thinking": False} if no_thinking else None
+    if no_thinking and reasoning_effort is None:
+        reasoning_effort = "none"
+    agent = build_agent(model=model, base_url=base_url, index_dir=index_dir, cards_path=cards, device=device, reasoning_effort=reasoning_effort, api_key=api_key, extra_body=extra_body, multi_dir=multi_dir, config=AgentConfig(max_steps=max_steps))
     console.print(f"[bold]ready[/bold] {agent.info}")
     history: list[dict] = []
 

@@ -60,7 +60,7 @@ def test_tool_call_then_finish_records_two_steps_and_structured_answer() -> None
     assert traj.step_count == 2 and traj.tool_call_count == 2
     assert traj.steps[0].observations[0].result == {"echoed": "hi"}
     assert traj.final_answer == "好的。"
-    assert traj.structured == {"recommendations": [{"novel_id": "n1", "title": "书", "reason": "r"}], "citations": []}
+    assert traj.structured == {"recommendations": [{"novel_id": "n1", "title": "书", "reason": "r"}], "citations": [], "asks_user": False}
     assert traj.prompt_tokens == 20 and traj.completion_tokens == 10
     assert model.seen[0][-1]["role"] == "user"
 
@@ -78,7 +78,7 @@ def test_tool_error_becomes_an_observation_not_a_crash() -> None:
     run = AgentLoop(model, registry_with_echo()).run("x")
     assert run.trajectory.steps[0].observations[0].error == "没有这本书"
     assert run.trajectory.termination == "finish"
-    assert run.trajectory.structured == {"recommendations": [], "citations": []}
+    assert run.trajectory.structured == {"recommendations": [], "citations": [], "asks_user": False}
 
 
 def test_text_only_turn_gets_one_nudge_then_ends_without_finish() -> None:

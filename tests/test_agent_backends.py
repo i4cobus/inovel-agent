@@ -79,10 +79,11 @@ def test_build_agent_assembles_tools_from_artifacts(tmp_path: Path, monkeypatch:
         embedder_factory=lambda name, device=None, dtype="fp32": FakeEmbedder(),
     )
     assert bundle.info["cards"] == 0 and "warning" not in bundle.info
-    assert sorted(bundle.tools.specs) == ["check_term", "check_trope", "get_profile", "memory_read", "memory_write", "search_books"]
-    assert bundle.info["searcher"] == "idx/dense_single" and bundle.info["profiles"] == 2
-    rows = bundle.tools.call("search_books", {"query": "都市", "k": 2})
+    assert sorted(bundle.tools.specs) == ["check_term", "check_trope", "get_profile", "memory_read", "memory_write", "search_books", "set_aside", "similar_books"]
+    assert bundle.info["searcher"] == "idx/dense_single" and bundle.info["profiles"] == 2 and bundle.info["passages"] is None  # no sections_json: no ask_book
+    rows = bundle.tools.call("search_books", {"query": "都市", "k": 2})["results"]
     assert {r["novel_id"] for r in rows} == {"a", "b"}
+    assert [r["novel_id"] for r in bundle.tools.call("similar_books", {"novel_id": "a", "k": 1})["results"]] == ["b"]
     assert bundle.tools.call("check_term", {"novel_id": "a", "terms": ["系统"]})["violates"] is False
 
     # One scripted turn through the real loop: the memory tool writes and the file is saved after the turn.

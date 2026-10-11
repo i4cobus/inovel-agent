@@ -30,7 +30,6 @@ from src.config import PROJECT_ROOT
 from src.evaluation import title_matches_anchor
 from src.preferences import constraint_violation_from_densities, is_rule_checkable, parse_preference_query
 from src.retrieval.card_schema import ELEMENT_ALIASES, ELEMENTS, GENRES, SUBGENRE_ALIASES, SUBGENRE_TO_GENRE
-from src.retrieval.query import retrieval_query
 
 SUPPLY_K = 10
 SUPPLY_DEPTH = 20
@@ -192,7 +191,7 @@ class PoolRow:
 def build_pool(searchers: Sequence[Any], queries: Sequence[SupplyQuery], depth: int = SUPPLY_DEPTH) -> tuple[list[PoolRow], dict[str, list[float]]]:
     """Top-``depth`` of every searcher for every query, plus per-config query latencies (ms).
 
-    The query goes through ``retrieval_query`` exactly as the tool does, so the pool measures what
+    The query reaches each searcher verbatim, exactly as the tool sends it (no term stripping since 2026-10-11), so the pool measures what
     ``search_books`` would have returned."""
 
     rows: list[PoolRow] = []
@@ -201,7 +200,7 @@ def build_pool(searchers: Sequence[Any], queries: Sequence[SupplyQuery], depth: 
         name = getattr(searcher, "name", "searcher")
         for query in queries:
             started = time.perf_counter()
-            results = searcher.search(retrieval_query(query.query), depth)
+            results = searcher.search(query.query, depth)
             latencies[name].append((time.perf_counter() - started) * 1000)
             for position, row in enumerate(results, start=1):
                 rows.append(
