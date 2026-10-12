@@ -217,3 +217,32 @@ def test_web_reports_a_model_failure_as_an_error_event(tmp_path: Path) -> None:
         events = read_events(response)
     # The loop records a model error as a terminated turn rather than raising, so the page gets a turn with the error.
     assert events[-1][0] == "turn" and events[-1][1]["turn"]["termination"] == "model_error" and "endpoint down" in events[-1][1]["turn"]["error"]
+
+
+def test_web_password_gate_and_per_browser_sessions(tmp_path: Path) -> None:
+    bundle, _ = make_bundle(tmp_path)
+    store = SessionStore(bundle, root=tmp_path / "sessions")
+    legacy = store.create(title="旧会话")  # no owner: visible to everyone
+    app = create_app(store, token="open-sesame")
+
+    anon = TestClient(app, follow_redirects=False)
+    assert anon.get("/").status_code == 303 and anon.get("/").headers["location"] == "/login"
+    assert anon.get("/api/sessions").status_code == 401
+    assert anon.get("/login").status_code == 200
+    assert anon.post("/login", content="password=wrong", headers={"Content-Type": "application/x-www-form-urlencoded"}).status_code == 401
+
+    alice = TestClient(app, follow_redirects=False)
+    login = alice.post("/login", content="password=open-sesame", headers={"Content-Type": "application/x-www-form-urlencoded"})
+    assert login.status_code == 303 and login.headers["location"] == "/"
+    assert alice.get("/").status_code == 200
+    mine = alice.post("/api/sessions", json={"title": "alice 的"}).json()
+    assert mine["owner"] and sorted(s["title"] for s in alice.get("/api/sessions").json()["sessions"]) == ["alice 的", "旧会话"]
+
+    bob = TestClient(app, follow_redirects=False)
+    bob.post("/login", content="password=open-sesame", headers={"Content-Type": "application/x-www-form-urlencoded"})
+    assert [s["title"] for s in bob.get("/api/sessions").json()["sessions"]] == ["旧会话"]
+    assert bob.get(f"/api/sessions/{mine['id']}").status_code == 404  # another browser's session does not exist for bob
+    assert bob.delete(f"/api/sessions/{mine['id']}").status_code == 404
+    assert bob.post(f"/api/sessions/{mine['id']}/messages", json={"text": "x"}).status_code == 404
+    assert bob.get(f"/api/sessions/{legacy.id}").status_code == 200
+    assert alice.get(f"/api/sessions/{mine['id']}").status_code == 200

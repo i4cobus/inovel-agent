@@ -202,10 +202,14 @@ class ChatSession:
     directory: Path
     agent: Any  # an AgentBundle fork
     title: str = ""
+    owner: str = ""  # the browser that created it (an opaque cookie value); empty means visible to everyone
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
     turns: list[Turn] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def visible_to(self, owner: str | None) -> bool:
+        return owner is None or not self.owner or self.owner == owner
 
     def history(self, max_turns: int = HISTORY_TURNS) -> list[dict[str, str]]:
         """The transcript the next turn is run with: user and assistant texts of the last ``max_turns`` turns.
@@ -239,6 +243,7 @@ class ChatSession:
         return {
             "id": self.id,
             "title": self.title,
+            "owner": self.owner,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "turns": len(self.turns),
@@ -258,6 +263,7 @@ class ChatSession:
         payload = {
             "id": self.id,
             "title": self.title,
+            "owner": self.owner,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "turns": [turn.to_dict() for turn in self.turns],
@@ -295,6 +301,7 @@ class SessionStore:
             directory=directory,
             agent=agent,
             title=str(data.get("title", "")),
+            owner=str(data.get("owner", "")),
             created_at=str(data.get("created_at", "")),
             updated_at=str(data.get("updated_at", "")),
             turns=[Turn.from_dict(t) for t in data.get("turns", [])],
@@ -306,46 +313,48 @@ class SessionStore:
         agent.turn = len(session.turns)
         self.sessions[session.id] = session
 
-    def create(self, title: str = "") -> ChatSession:
+    def create(self, title: str = "", owner: str = "") -> ChatSession:
         with self._lock:
             while True:
                 session_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
                 if session_id not in self.sessions and not (self.root / session_id).exists():
                     break
             directory = self.root / session_id
-            session = ChatSession(id=session_id, directory=directory, agent=self.bundle.fork(directory / "memory.json"), title=title.strip())
+            session = ChatSession(id=session_id, directory=directory, agent=self.bundle.fork(directory / "memory.json"), title=title.strip(), owner=owner)
             session.save()
             self.sessions[session_id] = session
             return session
 
-    def get(self, session_id: str) -> ChatSession:
+    def get(self, session_id: str, owner: str | None = None) -> ChatSession:
+        """``owner`` given: a session another browser created is reported as missing, not as forbidden."""
+
         session = self.sessions.get(session_id)
-        if session is None:
+        if session is None or not session.visible_to(owner):
             raise SessionNotFound(session_id)
         return session
 
-    def list(self) -> list[dict[str, Any]]:
-        return [s.summary() for s in sorted(self.sessions.values(), key=lambda s: s.updated_at, reverse=True)]
+    def list(self, owner: str | None = None) -> list[dict[str, Any]]:
+        return [s.summary() for s in sorted(self.sessions.values(), key=lambda s: s.updated_at, reverse=True) if s.visible_to(owner)]
 
-    def delete(self, session_id: str) -> None:
-        session = self.get(session_id)
+    def delete(self, session_id: str, owner: str | None = None) -> None:
+        session = self.get(session_id, owner)
         if session.lock.locked():
             raise SessionBusy(session_id)
         with self._lock:
             self.sessions.pop(session_id, None)
         shutil.rmtree(session.directory, ignore_errors=True)
 
-    def rename(self, session_id: str, title: str) -> ChatSession:
-        session = self.get(session_id)
+    def rename(self, session_id: str, title: str, owner: str | None = None) -> ChatSession:
+        session = self.get(session_id, owner)
         session.title = title.strip()
         session.updated_at = _now()
         session.save()
         return session
 
-    def send(self, session_id: str, text: str, on_step: Callable[[dict[str, Any]], None] | None = None) -> Turn:
+    def send(self, session_id: str, text: str, on_step: Callable[[dict[str, Any]], None] | None = None, owner: str | None = None) -> Turn:
         """Run one turn in the session. ``on_step`` receives each step's summary as it completes."""
 
-        session = self.get(session_id)
+        session = self.get(session_id, owner)
         text = text.strip()
         if not text:
             raise ValueError("empty message")

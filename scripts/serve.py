@@ -3,7 +3,9 @@
     uv run python scripts/serve.py --base-url <OpenAI 兼容地址> --api-key-file <key 文件> --no-thinking --port 8765
 
 Binds to 127.0.0.1 by default: on the PC reach it from the Mac through an ssh tunnel
-(``ssh -N -L 8765:127.0.0.1:8765 pc``), then open http://127.0.0.1:8765/. Sessions live under
+(``ssh -N -L 8765:127.0.0.1:8765 pc``), then open http://127.0.0.1:8765/. To let a few other people in,
+give ``--token-file`` (a shared password the page asks for once) and publish the port with
+``tailscale funnel 8765`` on the PC. Sessions live under
 data/sessions/<id>/ (memory, turns, full trajectories); they survive a restart.
 """
 
@@ -38,6 +40,7 @@ def main(
     api_key_file: Path | None = typer.Option(None, help="File holding the endpoint's API key; else INOVELREC_LLM_API_KEY."),
     no_thinking: bool = typer.Option(False, help="Send enable_thinking=false (百炼 Qwen3.x) and reasoning_effort=none (Ollama)."),
     multi_dir: Path | None = typer.Option(None, help="Multi-vector index for ask_book; default: the sibling multi_* of --index-dir."),
+    token_file: Path | None = typer.Option(None, help="File holding the shared password the page asks for; without it the app is open (bind to 127.0.0.1 only)."),
 ) -> None:
     import uvicorn
 
@@ -49,7 +52,9 @@ def main(
     print(f"ready {bundle.info}", flush=True)
     store = SessionStore(bundle, root=sessions_dir)
     print(f"sessions: {len(store.sessions)} restored from {sessions_dir}", flush=True)
-    uvicorn.run(create_app(store), host=host, port=port, log_level="info")
+    token = token_file.read_text(encoding="utf-8").strip() if token_file else None
+    print(f"access: {'password' if token else 'open'}", flush=True)
+    uvicorn.run(create_app(store, token=token), host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":
