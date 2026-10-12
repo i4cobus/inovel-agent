@@ -98,6 +98,20 @@ def test_sessions_are_restored_from_disk_with_state_and_memory(tmp_path: Path) -
     assert not session.directory.exists() and reopened.list() == []
 
 
+def test_history_keeps_only_the_last_turns_and_says_so(tmp_path: Path) -> None:
+    bundle, transport = make_bundle(tmp_path)
+    store = SessionStore(bundle, root=tmp_path / "sessions", history_turns=2)
+    session = store.create()
+    for i in range(4):
+        store.send(session.id, f"第{i}问")
+    # Messages the first model call of each turn saw: 1; 3; 5 (two kept turns); 7 (two kept turns plus the note pair), then it stays at 7
+    assert transport.history_lengths == [1, 3, 5, 7]
+    history = session.history(2)
+    assert history[0]["content"].startswith("（更早的 2 轮对话已省略") and history[1] == {"role": "assistant", "content": "好的。"}
+    assert [m["content"] for m in history if m["role"] == "user"][1:] == ["第2问", "第3问"]
+    assert session.history(0) == [{"role": "user", "content": "（更早的 4 轮对话已省略；用户的长期偏好见记忆，已推荐过的书见会话状态。）"}, {"role": "assistant", "content": "好的。"}]
+
+
 def test_a_running_session_rejects_a_second_message(tmp_path: Path) -> None:
     bundle, _ = make_bundle(tmp_path)
     store = SessionStore(bundle, root=tmp_path / "sessions")

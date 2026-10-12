@@ -29,6 +29,8 @@ from src.config import DATA_DIR
 
 DEFAULT_SESSIONS_DIR = DATA_DIR / "sessions"
 TITLE_CHARS = 24
+# Turns replayed verbatim into the next model call; older ones are dropped (memory and session state carry what matters).
+HISTORY_TURNS = 8
 
 
 class SessionError(Exception):
@@ -205,11 +207,21 @@ class ChatSession:
     turns: list[Turn] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def history(self) -> list[dict[str, str]]:
-        """The transcript the next turn is run with: user and assistant texts only, tool traffic dropped."""
+    def history(self, max_turns: int = HISTORY_TURNS) -> list[dict[str, str]]:
+        """The transcript the next turn is run with: user and assistant texts of the last ``max_turns`` turns.
 
+        Tool traffic is never replayed. Older turns are dropped, not summarised: what matters from them
+        is already carried separately, the preferences in memory and the recommended books in the
+        session state, both rendered into the system prompt every turn. A one-line note tells the
+        model that earlier turns exist so it does not treat the window as the whole conversation."""
+
+        kept = self.turns[-max_turns:] if max_turns > 0 else []
         messages: list[dict[str, str]] = []
-        for turn in self.turns:
+        dropped = len(self.turns) - len(kept)
+        if dropped > 0:
+            messages.append({"role": "user", "content": f"（更早的 {dropped} 轮对话已省略；用户的长期偏好见记忆，已推荐过的书见会话状态。）"})
+            messages.append({"role": "assistant", "content": "好的。"})
+        for turn in kept:
             messages.append({"role": "user", "content": turn.user})
             if turn.answer:
                 messages.append({"role": "assistant", "content": turn.answer})
@@ -259,10 +271,11 @@ class ChatSession:
 class SessionStore:
     """Creates, finds and runs sessions over one shared agent bundle."""
 
-    def __init__(self, bundle: Any, root: Path = DEFAULT_SESSIONS_DIR, keep_trajectories: bool = True) -> None:
+    def __init__(self, bundle: Any, root: Path = DEFAULT_SESSIONS_DIR, keep_trajectories: bool = True, history_turns: int = HISTORY_TURNS) -> None:
         self.bundle = bundle
         self.root = root
         self.keep_trajectories = keep_trajectories
+        self.history_turns = history_turns
         self.sessions: dict[str, ChatSession] = {}
         self._lock = threading.Lock()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -342,7 +355,7 @@ class SessionStore:
             index = len(session.turns) + 1
             callback = (lambda step: on_step(summarize_step(step))) if on_step is not None else None
             started = time.perf_counter()
-            run = session.agent.chat(text, history=session.history(), task_id=f"{session.id}-t{index}", on_step=callback)
+            run = session.agent.chat(text, history=session.history(self.history_turns), task_id=f"{session.id}-t{index}", on_step=callback)
             turn = Turn.from_trajectory(index, run.trajectory, time.perf_counter() - started)
             session.turns.append(turn)
             if not session.title:
