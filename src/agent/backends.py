@@ -198,10 +198,10 @@ class AgentBundle:
         child.reset_memory(memory_path)
         return child
 
-    def chat(self, user_message: str, history: list[dict[str, Any]] | None = None, task_id: str = "") -> Any:
+    def chat(self, user_message: str, history: list[dict[str, Any]] | None = None, task_id: str = "", on_step: Callable[..., None] | None = None) -> Any:
         self.turn += 1
         self.session.turn = self.turn
-        run = self.loop.run(user_message, history=history, task_id=task_id)
+        run = self.loop.run(user_message, history=history, task_id=task_id, on_step=on_step)
         self.memory.save(self.memory_path)
         return run
 

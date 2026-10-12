@@ -83,6 +83,7 @@ uv run python scripts/30_build_book_indexes.py --dense multi --cards data/proces
 uv run python scripts/33_pool_single_from_multi.py --kind-mean
 uv run python scripts/chat.py --base-url <OpenAI 兼容地址> --api-key-file <key 文件> --no-thinking   # 默认模型 qwen3.8-flash；端点也可用 INOVELREC_LLM_BASE_URL
 uv run python scripts/chat.py --model qwen3.5:9b                                                # 对照 arm：本地 Ollama
+uv run python scripts/serve.py --base-url <地址> --api-key-file <key> --no-thinking --port 8765   # 网页界面：多会话，各有记忆与上下文；ssh -L 8765:127.0.0.1:8765 pc 后在 Mac 浏览器打开
 uv run python scripts/35_run_agent_eval.py --run-id dev-01 --tasks eval/agent/tasks/constrained_rec.jsonl --base-url <地址> --api-key-file <key> --no-thinking --workers 6
 uv run python scripts/36_agent_metrics.py --run-id dev-01 --tasks eval/agent/tasks/constrained_rec.jsonl   # 硬指标，CPU
 ```
@@ -94,4 +95,5 @@ uv run python scripts/36_agent_metrics.py --run-id dev-01 --tasks eval/agent/tas
 
 digest v2、书卡 v3.2（7,410 张，245 本被接口内容审核拒收、不补）、4B 多向量索引（294,485 向量，含书卡段）与池化单向量索引均已建成，agent 默认用 `single_4b`。
 agent 层按自然语言对话改造完毕（书卡过滤、相似书、会话状态、`ask_book`、提问式结束）；主模型定为 Qwen3.8-Flash（两轮 dev 对比 Qwen3.7-Plus 后选定，`docs/agent-dev-rounds.md`），本地 9B 作对照；test 与索引阶段的候选供给评测尚未跑。
-按需建全书段落索引、追问与澄清类评测任务、界面属于下一步。
+网页界面（`scripts/serve.py`，Starlette + 单页，会话各自持有记忆、已推荐编号与对话记录，持久化在 `data/sessions/`）已写好，待在 PC 上接真实索引看效果。
+按需建全书段落索引、追问与澄清类评测任务属于下一步。

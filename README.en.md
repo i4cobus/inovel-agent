@@ -88,6 +88,7 @@ act on ends with a question (`asks_user`).
 ```bash
 uv sync
 uv run pytest      # CPU only, no model downloads
+uv run python scripts/serve.py --base-url <endpoint> --api-key-file <key> --no-thinking --port 8765   # web UI: sessions, each with its own memory and context
 ```
 
 Model calls read `INOVELREC_LLM_API_KEY` or `--api-key-file`; no credentials live in
@@ -102,5 +103,7 @@ the pooled single-vector index are built; the agent defaults to `single_4b`. The
 been reworked for natural-language conversation (card filters, similar books, session state,
 `ask_book`, question-style finish) and the main model is Qwen3.8-Flash (chosen over Qwen3.7-Plus after two dev rounds,
 `docs/agent-dev-rounds.md`), with the local 9B kept as the comparison arm. The test split and the
-index-stage candidate-supply evaluation have not been run yet. A build-on-demand full-book passage index, follow-up and
-clarification task types, and a UI are next.
+index-stage candidate-supply evaluation have not been run yet. The web UI (`scripts/serve.py`: Starlette plus one page;
+every session keeps its own memory, numbered recommendations and transcript under `data/sessions/`) is written and
+waits for a run against the real index on the PC. A build-on-demand full-book passage index and follow-up and
+clarification task types are next.

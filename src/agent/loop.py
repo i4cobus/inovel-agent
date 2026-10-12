@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from src.agent.context import ContextBudget, build_system_prompt, compact_messages, render_tool_result
 from src.agent.memory import UserMemory
@@ -151,7 +151,15 @@ class AgentLoop:
         self.model_name = model_name
         self.session = session
 
-    def run(self, user_message: str, history: list[dict[str, Any]] | None = None, task_id: str = "") -> AgentRun:
+    def run(
+        self,
+        user_message: str,
+        history: list[dict[str, Any]] | None = None,
+        task_id: str = "",
+        on_step: Callable[[Step], None] | None = None,
+    ) -> AgentRun:
+        """One turn. ``on_step`` is called after each step's tool calls have been answered (the web UI streams them)."""
+
         budget = self.config.budget
         messages: list[dict[str, Any]] = [{"role": "system", "content": build_system_prompt(self.memory, budget, self.session)}]
         messages.extend(history or [])
@@ -195,6 +203,8 @@ class AgentLoop:
             trajectory.steps.append(step)
 
             if not response.tool_calls:
+                if on_step is not None:
+                    on_step(step)
                 text_only_streak += 1
                 if text_only_streak >= 2:
                     trajectory.termination = "answer_without_finish"
@@ -244,6 +254,8 @@ class AgentLoop:
                 step.observations.append(observation)
                 content = observation.error if observation.error is not None else render_tool_result(observation.result, budget)
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
+            if on_step is not None:
+                on_step(step)
 
             if finished:
                 trajectory.termination = "finish"
