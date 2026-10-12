@@ -118,7 +118,7 @@ def test_step_summaries_describe_tool_results_in_one_line() -> None:
     assert describe_result("check_term", {"violates": True, "evidence": {"系统": 12.5}}) == "违反（系统 12.5）"
     assert describe_result("check_term", {"violates": None, "evidence": {}}) == "规则判不了"
     assert describe_result("check_trope", {"trope": "后宫", "verdict": "no", "confidence": "high", "reason": "单女主"}) == "后宫：no；置信 high；单女主"
-    assert describe_result("memory_write", {"written": {"kind": "negative", "value": "后宫", "persistent": False}}) == "已记住 negative：后宫（本次）"
+    assert describe_result("memory_write", {"written": {"kind": "negative", "value": "后宫", "persistent": False}}) == "已记住（仅本次）"
     assert describe_result("ask_book", {"coverage": "开头 1-3 章", "passages": [{}, {}]}) == "开头 1-3 章；读了 2 段"
     step = Step(index=0, assistant_content="想想", tool_calls=[{"id": "c1", "name": "get_profile", "arguments": {"novel_id": "x" * 200}}], observations=[Observation(tool="get_profile", call_id="c1", arguments={}, error="没有这本书", latency_s=0.01)], prompt_tokens=1, completion_tokens=1, latency_s=0.5)
     summary = summarize_step(step)

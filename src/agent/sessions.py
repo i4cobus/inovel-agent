@@ -96,7 +96,7 @@ def describe_result(tool: str, result: Any) -> str:
             return f"{label}（{evidence}）" if evidence else label
         if tool == "memory_write":
             entry = result.get("written") or {}
-            return f"已记住 {entry.get('kind', '')}：{entry.get('value', '')}（{'长期' if entry.get('persistent', True) else '本次'}）"
+            return "已记住（长期）" if entry.get("persistent", True) else "已记住（仅本次）"
         if tool == "memory_read":
             return "；".join(f"{kind} {len(items)} 条" for kind, items in result.items() if isinstance(items, list) and items) or "记忆为空"
         if tool == "set_aside":
