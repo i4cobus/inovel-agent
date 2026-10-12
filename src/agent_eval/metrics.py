@@ -9,7 +9,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
-from src.preferences import constraint_violation_from_densities, is_rule_checkable
+from src.preferences import TERM_SYNONYMS, constraint_violation_from_densities, is_rule_checkable
 
 FAILURE_LABELS = (
     "format",  # did not end with finish
@@ -73,6 +73,39 @@ def checked_tropes(trajectory: Mapping[str, Any]) -> dict[str, set[str]]:
     return out
 
 
+def _requested_forms(requested: Iterable[str]) -> set[str]:
+    """A requested term plus the surface forms check_term merges for it (修仙 → 筑基、金丹 …)."""
+
+    forms: set[str] = set()
+    for term in requested:
+        term = str(term).strip()
+        if term:
+            forms.add(term)
+            forms.update(TERM_SYNONYMS.get(term, ()))
+    return forms
+
+
+def _is_requested(term: str, forms: set[str]) -> bool:
+    term = term.strip()
+    return bool(term) and any(term == f or term in f or f in term for f in forms)
+
+
+def unrequested_checks(trajectory: Mapping[str, Any], requested: Iterable[str]) -> int:
+    """check_term / check_trope calls on a term nobody asked for: neither a negative of the session (task
+    negatives plus what memory held), nor a surface form of one (the synonym table, or a string that contains
+    or is contained in one, 直播间 for 直播), so the only source was the model's own initiative. Seen in the
+    first real conversations on 2026-10-12, where 后宫 was checked in a request that never mentioned it."""
+
+    forms = _requested_forms(requested)
+    count = 0
+    for args in tool_calls(trajectory, "check_term"):
+        count += sum(1 for term in (args.get("terms") or []) if not _is_requested(str(term), forms))
+    for args in tool_calls(trajectory, "check_trope"):
+        if not _is_requested(str(args.get("trope", "")), forms):
+            count += 1
+    return count
+
+
 def rule_violations(ids: Iterable[str], terms: list[str], densities: Mapping[str, Mapping[str, float]]) -> dict[str, bool | None]:
     checkable = [t for t in terms if is_rule_checkable(t)]
     if not checkable:
@@ -96,6 +129,7 @@ class SessionScore:
     trope_coverage: float | None
     violation_rate: float | None
     unchecked_rate: float | None
+    unrequested_checks: int = 0
     labels: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -109,6 +143,7 @@ def score_session(
     densities: Mapping[str, Mapping[str, float]],
     min_recommendations: int = 1,
     require_recommendations: bool = True,
+    remembered: Iterable[str] = (),
 ) -> SessionScore:
     termination = str(trajectory.get("termination", ""))
     recs = recommended_ids(trajectory)
@@ -158,6 +193,7 @@ def score_session(
         trope_coverage=trope_cov,
         violation_rate=violation,
         unchecked_rate=unchecked,
+        unrequested_checks=unrequested_checks(trajectory, [*negatives_in_text, *negatives_meta, *remembered]),
         labels=labels,
     )
 
@@ -196,7 +232,9 @@ def score_task(task: Mapping[str, Any], trajectories: list[Mapping[str, Any]], m
             must_pass = task.get("negatives_in_text", [])
         meta = task.get("negatives_meta", []) if task["kind"] == "constrained_rec" else []
         min_recs = int(expect.get("min_recommendations", 0))
-        score = score_session(trajectory, must_pass, meta, densities, min_recommendations=max(min_recs, 1), require_recommendations=min_recs > 0)
+        remembered = [str(e.get("value", "")) for kind in ("negative", "positive") for e in (memory_state.get(kind) or []) if isinstance(e, dict)]
+        remembered += [t for s in sessions for t in (s.get("expect", {}).get("persist", []) + s.get("expect", {}).get("must_pass", []))]
+        score = score_session(trajectory, must_pass, meta, densities, min_recommendations=max(min_recs, 1), require_recommendations=min_recs > 0, remembered=remembered)
         mem = memory_labels(expect, memory_state)
         score.labels.extend(mem)
         labels.extend(score.labels)
@@ -213,6 +251,7 @@ def score_task(task: Mapping[str, Any], trajectories: list[Mapping[str, Any]], m
         "labels": sorted(set(labels)),
         "sessions": rows,
         "steps": sum(r["steps"] for r in rows),
+        "unrequested_checks": sum(r.get("unrequested_checks", 0) for r in rows),
         "prompt_tokens": sum(r["prompt_tokens"] for r in rows),
         "completion_tokens": sum(r["completion_tokens"] for r in rows),
     }
@@ -237,6 +276,7 @@ def aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
             "violation_rate_macro": round(sum(violation) / len(violation), 4) if violation else None,
             "check_term_coverage": round(sum(term_cov) / len(term_cov), 4) if term_cov else None,
             "check_trope_coverage": round(sum(trope_cov) / len(trope_cov), 4) if trope_cov else None,
+            "unrequested_checks_per_session": round(sum(s.get("unrequested_checks", 0) for s in session_rows) / len(session_rows), 2),
             "labels": dict(Counter(label for r in subset for label in r["labels"])),
         }
 
@@ -248,7 +288,7 @@ def aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 def format_summary(summary: Mapping[str, Any]) -> str:
-    columns = ["n", "pass_rate", "finish_rate", "mean_steps_per_session", "mean_prompt_tokens_per_session", "violation_rate_macro", "check_term_coverage", "check_trope_coverage"]
+    columns = ["n", "pass_rate", "finish_rate", "mean_steps_per_session", "mean_prompt_tokens_per_session", "violation_rate_macro", "check_term_coverage", "check_trope_coverage", "unrequested_checks_per_session"]
     lines = ["| group | " + " | ".join(columns) + " |", "|---|" + "---|" * len(columns)]
     lines.append("| overall | " + " | ".join(str(summary["overall"].get(c)) for c in columns) + " |")
     for key in ("kind", "variant"):

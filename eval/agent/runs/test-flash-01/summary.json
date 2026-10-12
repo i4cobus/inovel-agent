@@ -1,0 +1,143 @@
+{
+  "overall": {
+    "n": 75,
+    "pass_rate": 0.8667,
+    "finish_rate": 0.9813,
+    "mean_steps_per_session": 6.06,
+    "mean_prompt_tokens_per_session": 42390,
+    "violation_rate_macro": 0.0119,
+    "check_term_coverage": 0.9619,
+    "check_trope_coverage": 0.9495,
+    "unrequested_checks_per_session": 2.14,
+    "labels": {
+      "tool_skipped": 6,
+      "constraint_violated": 2,
+      "format": 2,
+      "model_error": 1,
+      "no_recommendation": 2
+    }
+  },
+  "kind": {
+    "constrained_rec": {
+      "n": 50,
+      "pass_rate": 0.86,
+      "finish_rate": 0.98,
+      "mean_steps_per_session": 6.96,
+      "mean_prompt_tokens_per_session": 51440,
+      "violation_rate_macro": 0.0238,
+      "check_term_coverage": 0.981,
+      "check_trope_coverage": 0.9495,
+      "unrequested_checks_per_session": 1.82,
+      "labels": {
+        "tool_skipped": 3,
+        "constraint_violated": 2,
+        "format": 1,
+        "model_error": 1,
+        "no_recommendation": 2
+      }
+    },
+    "memory": {
+      "n": 25,
+      "pass_rate": 0.88,
+      "finish_rate": 0.9825,
+      "mean_steps_per_session": 5.26,
+      "mean_prompt_tokens_per_session": 34452,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.9429,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 2.42,
+      "labels": {
+        "tool_skipped": 3,
+        "format": 1
+      }
+    }
+  },
+  "variant": {
+    "accumulate": {
+      "n": 7,
+      "pass_rate": 0.8571,
+      "finish_rate": 0.9524,
+      "mean_steps_per_session": 3.95,
+      "mean_prompt_tokens_per_session": 20989,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.8929,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 0.57,
+      "labels": {
+        "format": 1,
+        "tool_skipped": 1
+      }
+    },
+    "in_text": {
+      "n": 16,
+      "pass_rate": 0.875,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 6.75,
+      "mean_prompt_tokens_per_session": 51146,
+      "violation_rate_macro": 0.0521,
+      "check_term_coverage": 1.0,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 3.31,
+      "labels": {
+        "constraint_violated": 2
+      }
+    },
+    "meta": {
+      "n": 14,
+      "pass_rate": 0.9286,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 6.71,
+      "mean_prompt_tokens_per_session": 51177,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": 1.0,
+      "unrequested_checks_per_session": 0.07,
+      "labels": {
+        "no_recommendation": 1
+      }
+    },
+    "mixed": {
+      "n": 20,
+      "pass_rate": 0.8,
+      "finish_rate": 0.95,
+      "mean_steps_per_session": 7.3,
+      "mean_prompt_tokens_per_session": 51860,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.9649,
+      "check_trope_coverage": 0.9123,
+      "unrequested_checks_per_session": 1.85,
+      "labels": {
+        "tool_skipped": 3,
+        "format": 1,
+        "model_error": 1,
+        "no_recommendation": 1
+      }
+    },
+    "oneoff": {
+      "n": 8,
+      "pass_rate": 1.0,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 5.94,
+      "mean_prompt_tokens_per_session": 40304,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 1.0,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 3.5,
+      "labels": {}
+    },
+    "persist": {
+      "n": 10,
+      "pass_rate": 0.8,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 6.1,
+      "mean_prompt_tokens_per_session": 43906,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.9375,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 3.5,
+      "labels": {
+        "tool_skipped": 2
+      }
+    }
+  }
+}
