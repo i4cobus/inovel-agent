@@ -246,3 +246,13 @@ def test_web_password_gate_and_per_browser_sessions(tmp_path: Path) -> None:
     assert bob.post(f"/api/sessions/{mine['id']}/messages", json={"text": "x"}).status_code == 404
     assert bob.get(f"/api/sessions/{legacy.id}").status_code == 200
     assert alice.get(f"/api/sessions/{mine['id']}").status_code == 200
+
+
+def test_web_link_with_key_logs_the_browser_in(tmp_path: Path) -> None:
+    bundle, _ = make_bundle(tmp_path)
+    app = create_app(SessionStore(bundle, root=tmp_path / "sessions"), token="open-sesame")
+    client = TestClient(app, follow_redirects=False)
+    assert client.get("/?key=nope").status_code == 303 and client.get("/?key=nope").headers["location"] == "/login"
+    landed = client.get("/?key=open-sesame")
+    assert landed.status_code == 303 and landed.headers["location"] == "/" and "inovel_auth=" in landed.headers["set-cookie"]
+    assert client.get("/").status_code == 200 and client.get("/api/sessions").status_code == 200

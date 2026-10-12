@@ -16,8 +16,9 @@ Routes (all JSON unless noted)::
                                           then ``turn`` with the answer, the memory and the session state;
                                           ``error`` on failure. 409 when the session is already running a turn.
 
-Access: with a ``token`` the whole app sits behind one shared password (a cookie after ``/login``), so a
-handful of people can be given the address without giving away the API budget. Every browser gets an
+Access: with a ``token`` the whole app sits behind one shared password (a cookie after ``/login``, or
+after opening a link that carries it as ``?key=``), so a handful of people can be given the address
+without giving away the API budget. Every browser gets an
 opaque owner cookie and sees only the sessions it created (sessions from before the cookie existed are
 visible to all). The agent runs synchronously, so a turn is executed in a worker thread; step summaries
 cross back to the event loop through a queue.
@@ -86,6 +87,11 @@ class AccessMiddleware(BaseHTTPMiddleware):
         if self.token and request.url.path != "/login":
             presented = request.cookies.get(AUTH_COOKIE) or ""
             if not hmac.compare_digest(presented, self.token):
+                # A link carrying the password (…/?key=…) logs the browser in and lands on the clean path.
+                if hmac.compare_digest(request.query_params.get("key") or "", self.token):
+                    response = RedirectResponse(request.url.path, status_code=303)
+                    response.set_cookie(AUTH_COOKIE, self.token, max_age=COOKIE_DAYS * 86400, httponly=True, samesite="lax", secure=_secure(request))
+                    return response
                 if request.url.path.startswith("/api/"):
                     return JSONResponse({"error": "login required"}, status_code=401)
                 return RedirectResponse("/login", status_code=303)
