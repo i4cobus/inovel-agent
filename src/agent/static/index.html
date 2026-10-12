@@ -35,18 +35,25 @@
   main { display: flex; flex-direction: column; }
   header { padding: 18px 28px 10px; display: flex; align-items: baseline; gap: 12px; }
   header h1 { font-size: 18px; margin: 0; font-weight: 500; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  header .info { color: var(--faint); font-size: 12px; font-family: var(--mono); }
   .log { flex: 1; overflow-y: auto; padding: 8px 28px 24px; display: flex; flex-direction: column; gap: 20px; }
   .msg { max-width: 760px; }
   .msg.user { align-self: flex-end; background: var(--user); padding: 8px 16px; border-radius: 14px 14px 3px 14px; white-space: pre-wrap; }
   .msg.agent { align-self: flex-start; width: 100%; }
   .answer { white-space: pre-wrap; padding: 2px 0; }
   .answer.asks::before { content: "问 "; color: var(--accent); }
-  .recs { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
-  .rec { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
-  .rec .name { font-size: 17px; }
-  .rec .name::before { content: "《"; color: var(--faint); } .rec .name::after { content: "》"; color: var(--faint); }
-  .rec .why { font-size: 14px; color: var(--muted); margin-top: 2px; line-height: 1.6; }
+  a.book { color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent); cursor: pointer; }
+  a.book:hover { background: var(--accent-soft); }
+  .recs { margin-top: 10px; font-size: 14px; color: var(--muted); }
+  .recs a.book { margin-right: 10px; }
+  #panel { position: fixed; top: 0; right: 0; bottom: 0; width: 400px; max-width: 100vw; background: var(--panel); border-left: 1px solid var(--line); box-shadow: -12px 0 32px rgba(0,0,0,.08); transform: translateX(100%); transition: transform .2s ease; overflow-y: auto; padding: 24px 26px 32px; z-index: 10; }
+  #panel.open { transform: none; }
+  #panel .close { position: absolute; top: 14px; right: 16px; border: 0; background: none; color: var(--faint); font: inherit; font-size: 20px; cursor: pointer; }
+  #panel h3 { margin: 0 0 2px; font-size: 22px; font-weight: 500; }
+  #panel .genre { color: var(--muted); margin-bottom: 12px; }
+  #panel .why { border-left: 2px solid var(--accent); padding-left: 10px; color: var(--ink); margin: 10px 0 16px; font-size: 15px; }
+  #panel h4 { font-size: 12px; color: var(--faint); margin: 14px 0 4px; font-weight: 500; letter-spacing: .1em; }
+  #panel .row { font-size: 14px; }
+  #panel .blurb { font-size: 14px; color: var(--muted); white-space: pre-wrap; line-height: 1.7; }
   .cites { font-size: 13px; color: var(--muted); margin-top: 8px; }
   .trace { margin-top: 10px; font-size: 13px; }
   .trace summary { color: var(--faint); cursor: pointer; user-select: none; list-style: none; }
@@ -87,13 +94,14 @@
   <div class="sessions" id="sessions"></div>
 </aside>
 <main>
-  <header><h1 id="title"></h1><span class="info" id="hinfo"></span></header>
+  <header><h1 id="title"></h1></header>
   <div class="log" id="log"><div class="welcome">每个会话有自己的记忆与上下文。换一类书，另开一个。</div></div>
   <form id="form">
     <textarea id="input" placeholder="想看什么书" disabled></textarea>
     <button class="send" id="send" type="submit" disabled>发送</button>
   </form>
 </main>
+<div id="panel"><button class="close" id="panel-close">×</button><div id="panel-body"></div></div>
 <section class="side">
   <h2>记忆</h2><div id="memory" class="empty">—</div>
   <h2>已推荐</h2><div id="recommended" class="empty">—</div>
@@ -118,7 +126,6 @@ async function loadInfo() {
   try {
     const info = await api("/api/info");
     $("model").textContent = info.model || "";
-    $("hinfo").textContent = `${info.profiles || 0} 本`;
   } catch (e) { $("model").textContent = "未连接"; }
 }
 
@@ -172,18 +179,33 @@ function renderSession() {
 
 function userBubble(text) { const d = document.createElement("div"); d.className = "msg user"; d.textContent = text; return d; }
 
+const bare = (t) => String(t || "").replace(/^[《「]+|[》」]+$/g, "");
+function chip(r) { return `<a class="book" data-id="${esc(r.novel_id)}" data-why="${esc(r.reason || "")}">《${esc(bare(r.title) || r.novel_id)}》</a>`; }
+function answerHtml(answer, recs) {
+  // Every 《title》 of a recommended book becomes a chip in place; books the text never names are listed after it.
+  let html = esc(answer);
+  const missing = [];
+  for (const r of recs) {
+    const title = bare(r.title);
+    if (!title) continue;
+    const needle = esc(`《${title}》`);
+    if (html.includes(needle)) html = html.split(needle).join(chip(r));
+    else missing.push(r);
+  }
+  return { html, missing };
+}
 function agentBubble(turn, live = false) {
   const d = document.createElement("div");
   d.className = "msg agent";
   const st = turn.structured || {};
-  const bare = (t) => String(t || "").replace(/^[《「]+|[》」]+$/g, "");
-  const recs = (st.recommendations || []).map((r) => `<div class="rec"><div class="name">${esc(bare(r.title) || r.novel_id)}</div>${r.reason ? `<div class="why">${esc(r.reason)}</div>` : ""}</div>`).join("");
+  const recs = st.recommendations || [];
+  const { html, missing } = answerHtml(turn.answer || (turn.error ? "出错：" + turn.error : "没有回答"), recs);
   const cites = (st.citations || []).map((c) => `${esc(c.novel_id)} ${esc(c.chapter)}`).join("；");
   const bad = turn.termination && turn.termination !== "finish";
   const meta = [`${turn.steps.length} 步`, turn.elapsed_s ? `${turn.elapsed_s} s` : ""].filter(Boolean).join(" · ");
   d.innerHTML = `
-    ${live ? "" : `<div class="answer${st.asks_user ? " asks" : ""}">${esc(turn.answer || (turn.error ? "出错：" + turn.error : "没有回答"))}</div>`}
-    ${recs ? `<div class="recs">${recs}</div>` : ""}
+    ${live ? "" : `<div class="answer${st.asks_user ? " asks" : ""}">${html}</div>`}
+    ${missing.length ? `<div class="recs">另外推荐 ${missing.map(chip).join("")}</div>` : ""}
     ${cites ? `<div class="cites">出处 ${cites}</div>` : ""}
     <details class="trace" ${live ? "open" : ""}><summary>${live ? '<span class="live"></span>' : ""}${live ? "处理中" : "过程"} · ${meta}</summary><div class="steps">${turn.steps.map(stepHtml).join("")}</div></details>
     ${bad ? `<div class="status">未正常结束：${esc(turn.termination)}${turn.error ? " · " + esc(turn.error) : ""}</div>` : ""}`;
@@ -217,7 +239,7 @@ function renderSide(s) {
   }
   mem.innerHTML = parts.join("") || '<span class="empty">—</span>';
   const r = (s.state && s.state.recommended) || [];
-  rec.innerHTML = r.length ? `<ol class="recs-list">${r.map((x) => `<li>${esc(String(x.title || x.novel_id).replace(/^[《「]+|[》」]+$/g, ""))}</li>`).join("")}</ol>` : '<span class="empty">—</span>';
+  rec.innerHTML = r.length ? `<ol class="recs-list">${r.map((x) => `<li><a class="book" data-id="${esc(x.novel_id)}">${esc(bare(x.title) || x.novel_id)}</a></li>`).join("")}</ol>` : '<span class="empty">—</span>';
   const x = (s.state && s.state.excluded) || [];
   exc.innerHTML = x.length ? x.map((id) => `<span class="tag off">${esc((s.state.shown || {})[id] || id)}</span>`).join("") : '<span class="empty">—</span>';
 }
@@ -272,6 +294,35 @@ async function send(text) {
     loadSessions();
   }
 }
+
+const bookCache = {};
+async function openBook(id, why) {
+  const panel = $("panel"), body = $("panel-body");
+  panel.classList.add("open");
+  body.innerHTML = '<div class="empty">…</div>';
+  try {
+    const b = bookCache[id] || (bookCache[id] = await api(`/api/books/${id}`));
+    const c = b.card || {};
+    const style = Object.entries(c.style || {}).filter(([, v]) => v).map(([k, v]) => `${esc(k)} ${esc(v)}`).join("　");
+    const rows = [["主角", c.protagonist], ["背景", c.setting], ["气质", c.tone], ["一句话", c.one_liner]].filter(([, v]) => v);
+    body.innerHTML = `
+      <h3>${esc(bare(b.title) || id)}</h3>
+      <div class="genre">${esc(c.genre || "")}${c.subgenre ? " · " + esc(c.subgenre) : ""}</div>
+      ${why ? `<div class="why">${esc(why)}</div>` : ""}
+      ${(c.elements || []).length ? `<h4>元素</h4><div>${c.elements.map((e) => `<span class="tag">${esc(e)}</span>`).join("")}</div>` : ""}
+      ${style ? `<h4>风格</h4><div class="row">${style}</div>` : ""}
+      ${rows.length ? `<h4>书卡</h4>${rows.map(([k, v]) => `<div class="row"><span class="kind">${k}</span>${esc(v)}</div>`).join("")}` : ""}
+      ${b.blurb ? `<h4>简介</h4><div class="blurb">${esc(b.blurb)}</div>` : ""}
+      ${!b.card && !b.blurb ? '<div class="empty">这本书没有书卡</div>' : ""}`;
+  } catch (e) { body.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+$("panel-close").onclick = () => $("panel").classList.remove("open");
+document.addEventListener("click", (ev) => {
+  const a = ev.target.closest("a.book");
+  if (a) { ev.preventDefault(); openBook(a.dataset.id, a.dataset.why); }
+  else if (!ev.target.closest("#panel")) $("panel").classList.remove("open");
+});
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") $("panel").classList.remove("open"); });
 
 $("new").onclick = newSession;
 $("form").onsubmit = (ev) => { ev.preventDefault(); const t = $("input").value; $("input").value = ""; send(t); };

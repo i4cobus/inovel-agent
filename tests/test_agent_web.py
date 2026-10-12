@@ -162,6 +162,7 @@ def test_web_api_creates_sessions_and_streams_steps_then_the_turn(tmp_path: Path
 
     assert client.get("/").text.startswith("<!doctype html>")
     assert client.get("/api/info").json()["model"] == "stub"
+    assert client.get("/api/books/a").status_code == 404  # the stub bundle has no profiles and no cards
     created = client.post("/api/sessions", json={}).json()
     assert created["turns"] == [] and created["memory"]["negative"] == []
 
@@ -181,6 +182,24 @@ def test_web_api_creates_sessions_and_streams_steps_then_the_turn(tmp_path: Path
     assert client.get("/api/sessions/nope").status_code == 404
     assert client.delete(f"/api/sessions/{created['id']}").status_code == 204
     assert client.get("/api/sessions").json()["sessions"] == []
+
+
+def test_web_serves_a_book_with_its_card(tmp_path: Path) -> None:
+    from src.retrieval.cards import BookCard
+    from src.retrieval.catalog import CardCatalog
+
+    bundle, _ = make_bundle(tmp_path)
+
+    class Profiles:
+        def get(self, novel_id: str) -> dict[str, str] | None:
+            return {"title": "书a", "blurb": "简介" * 1000, "profile": "", "card": ""} if novel_id == "a" else None
+
+    bundle.backends["profiles"] = Profiles()
+    bundle.backends["catalog"] = CardCatalog({"a": BookCard(novel_id="a", genre="仙侠", subgenre="幻想修仙", elements=["凡人流"], style={"爽度": "低"})})
+    client = TestClient(create_app(SessionStore(bundle, root=tmp_path / "sessions")))
+    book = client.get("/api/books/a").json()
+    assert book["title"] == "书a" and len(book["blurb"]) == 1500 and book["card"]["elements"] == ["凡人流"] and book["card"]["style"] == {"爽度": "低"}
+    assert client.get("/api/books/zzz").status_code == 404
 
 
 def test_web_reports_a_model_failure_as_an_error_event(tmp_path: Path) -> None:

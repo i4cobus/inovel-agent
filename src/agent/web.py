@@ -4,6 +4,7 @@ Routes (all JSON unless noted)::
 
     GET    /                              the single-page UI (static/index.html)
     GET    /api/info                      the agent bundle's info (model, index, tools)
+    GET    /api/books/{novel_id}          one book: title, synopsis and its card (the page's book panel)
     GET    /api/sessions                  session summaries, newest first
     POST   /api/sessions   {title?}       create a session
     GET    /api/sessions/{id}             turns, memory, session state
@@ -50,6 +51,22 @@ def create_app(store: SessionStore, info: dict[str, Any] | None = None) -> Starl
 
     async def get_info(_: Request) -> Response:
         return JSONResponse({**bundle_info, "sessions": len(store.sessions)})
+
+    async def get_book(request: Request) -> Response:
+        novel_id = request.path_params["nid"]
+        backends = getattr(store.bundle, "backends", {}) or {}
+        profiles, catalog = backends.get("profiles"), backends.get("catalog")
+        row = profiles.get(novel_id) if profiles is not None else None
+        card = catalog.cards.get(novel_id) if catalog is not None else None
+        if row is None and card is None:
+            return JSONResponse({"error": "no such book"}, status_code=404)
+        row = row or {}
+        return JSONResponse({
+            "novel_id": novel_id,
+            "title": row.get("title", ""),
+            "blurb": str(row.get("blurb", ""))[:1500],
+            "card": card.to_dict() if hasattr(card, "to_dict") else None,
+        })
 
     async def list_sessions(_: Request) -> Response:
         return JSONResponse({"sessions": store.list()})
@@ -129,6 +146,7 @@ def create_app(store: SessionStore, info: dict[str, Any] | None = None) -> Starl
     routes = [
         Route("/", index),
         Route("/api/info", get_info),
+        Route("/api/books/{nid}", get_book),
         Route("/api/sessions", list_sessions, methods=["GET"]),
         Route("/api/sessions", create_session, methods=["POST"]),
         Route("/api/sessions/{sid}", get_session, methods=["GET"]),
