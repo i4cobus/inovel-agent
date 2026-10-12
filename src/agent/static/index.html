@@ -176,7 +176,8 @@ function agentBubble(turn, live = false) {
   const d = document.createElement("div");
   d.className = "msg agent";
   const st = turn.structured || {};
-  const recs = (st.recommendations || []).map((r) => `<div class="rec"><div class="name">${esc(r.title || r.novel_id)}</div>${r.reason ? `<div class="why">${esc(r.reason)}</div>` : ""}</div>`).join("");
+  const bare = (t) => String(t || "").replace(/^[《「]+|[》」]+$/g, "");
+  const recs = (st.recommendations || []).map((r) => `<div class="rec"><div class="name">${esc(bare(r.title) || r.novel_id)}</div>${r.reason ? `<div class="why">${esc(r.reason)}</div>` : ""}</div>`).join("");
   const cites = (st.citations || []).map((c) => `${esc(c.novel_id)} ${esc(c.chapter)}`).join("；");
   const bad = turn.termination && turn.termination !== "finish";
   const meta = [`${turn.steps.length} 步`, turn.elapsed_s ? `${turn.elapsed_s} s` : ""].filter(Boolean).join(" · ");
@@ -216,7 +217,7 @@ function renderSide(s) {
   }
   mem.innerHTML = parts.join("") || '<span class="empty">—</span>';
   const r = (s.state && s.state.recommended) || [];
-  rec.innerHTML = r.length ? `<ol class="recs-list">${r.map((x) => `<li>${esc(x.title || x.novel_id)}</li>`).join("")}</ol>` : '<span class="empty">—</span>';
+  rec.innerHTML = r.length ? `<ol class="recs-list">${r.map((x) => `<li>${esc(String(x.title || x.novel_id).replace(/^[《「]+|[》」]+$/g, ""))}</li>`).join("")}</ol>` : '<span class="empty">—</span>';
   const x = (s.state && s.state.excluded) || [];
   exc.innerHTML = x.length ? x.map((id) => `<span class="tag off">${esc((s.state.shown || {})[id] || id)}</span>`).join("") : '<span class="empty">—</span>';
 }
