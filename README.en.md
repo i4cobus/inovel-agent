@@ -109,8 +109,9 @@ the candidates, or did the agent not follow the procedure?
   synthesised from templates and vocabularies and split with a fixed seed into test 75 /
   dev 20. Two dev rounds: Qwen3.8-Flash 0.55 → 0.75, Qwen3.7-Plus 0.30 → 0.70, five fixes in
   between; Flash is the main model, the local Qwen3.5-9B the comparison arm. On the 75 test
-  tasks Flash passes 0.867 (finish 0.98, per-book check coverage 0.96 / 0.95; `docs/agent-test.md`
-  attributes every failure); the 9B arm has not been run.
+  tasks Flash passes 0.867 (finish 0.98, per-book check coverage 0.96 / 0.95) and the local 9B
+  arm 0.227 (finish 0.66; it answers in prose instead of calling finish, confuses the two check
+  tools and hardly uses memory); `docs/agent-test.md` attributes every failure.
 - **Index stage** (`src/retrieval/supply.py`, `supply_judge.py`, `docs/retrieval-supply.md`):
   candidate supply as the agent uses it, with the queries the agent actually emitted; top-k
   positive precision, feasibility (do three candidates survive the negatives), anchor hits,
@@ -147,12 +148,12 @@ Model calls read `INOVELREC_LLM_API_KEY` or `--api-key-file` and the endpoint fr
 `INOVELREC_LLM_BASE_URL`. Development happens on a Mac; card building, index building, agent
 runs and the UI server run on a Windows machine with an RTX 4080.
 
-## Status (2026-10-12)
+## Status (2026-10-13)
 
 Done: digest v2, book cards v3.2, the 4B multi-vector and pooled single-vector indexes, the
-agent layer reworked for natural-language conversation, two dev rounds and the model choice,
-the multi-session web UI running against the real index.
-In progress: the 9B comparison; the first candidate-supply evaluation on the 4B index; three
+agent layer reworked for natural-language conversation, two dev rounds and the model choice, the
+Flash-versus-9B comparison on the test split, the multi-session web UI running against the real index.
+In progress: the first candidate-supply evaluation on the 4B index; three
 prompt fixes the test exposed (a book the check marks as violating is not recommended, remembered
 exclusions are re-checked before recommending, a memory-only turn still ends with finish).
 Next: a realistic request set and new task types (in-book QA, follow-ups, clarification), a

@@ -1,0 +1,75 @@
+{"task_id": "rec-012", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-014", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-017", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-018", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-020", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-022", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-023", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-026", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-029", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-031", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-038", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-041", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-043", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-048", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-050", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-053", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-055", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-058", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-060", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-061", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-066", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-068", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-069", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-071", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-073", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-075", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-079", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-080", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-081", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-083", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-085", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-087", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-089", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-092", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-094", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-096", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-098", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-099", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-102", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-103", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-104", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-105", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-106", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-111", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-113", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-115", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-118", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-120", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-122", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "rec-123", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "mem-000", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不要系统", "persistent": true, "turn": 1, "written_at": "2026-10-12T16:54:27+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要系统", "persistent": true, "turn": 1, "written_at": "2026-10-12T16:54:27+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-002", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}, {"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "mem-003", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不看修仙题材", "persistent": true, "turn": 1, "written_at": "2026-10-12T16:56:03+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不看修仙题材", "persistent": true, "turn": 1, "written_at": "2026-10-12T16:56:03+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-005", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}, {"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "mem-006", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不看穿越", "persistent": true, "turn": 1, "written_at": "2026-10-12T16:57:32+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不看穿越", "persistent": true, "turn": 1, "written_at": "2026-10-12T16:57:32+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-010", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不要异能", "persistent": true, "turn": 1, "written_at": "2026-10-12T16:58:25+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要异能", "persistent": true, "turn": 1, "written_at": "2026-10-12T16:58:25+00:00"}, {"kind": "negative", "value": "不要异能、不要修仙", "persistent": true, "turn": 2, "written_at": "2026-10-12T16:58:27+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要异能", "persistent": true, "turn": 1, "written_at": "2026-10-12T16:58:25+00:00"}, {"kind": "negative", "value": "不要异能、不要修仙", "persistent": true, "turn": 2, "written_at": "2026-10-12T16:58:27+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-011", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}, {"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "mem-012", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不看带变身的书", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:01:12+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不看带变身的书", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:01:12+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-013", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不要异能", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:01:56+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要异能", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:01:56+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要异能", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:01:56+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-015", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "以后都不看带修真的书", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:02:32+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "以后都不看带修真的书", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:02:32+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-016", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不要穿越", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:03:56+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要穿越", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:03:56+00:00"}, {"kind": "negative", "value": "不要变身", "persistent": true, "turn": 2, "written_at": "2026-10-12T17:03:59+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要穿越", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:03:56+00:00"}, {"kind": "negative", "value": "不要变身", "persistent": true, "turn": 2, "written_at": "2026-10-12T17:03:59+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-017", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}, {"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "mem-018", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不看带直播的书", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:05:43+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不看带直播的书", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:05:43+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-019", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不要修仙题材的书", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:07:02+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要修仙题材的书", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:07:02+00:00"}, {"kind": "negative", "value": "兽人", "persistent": true, "turn": 2, "written_at": "2026-10-12T17:07:05+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要修仙题材的书", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:07:02+00:00"}, {"kind": "negative", "value": "兽人", "persistent": true, "turn": 2, "written_at": "2026-10-12T17:07:05+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-020", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}, {"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "mem-021", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不要异能", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:09:09+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要异能", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:09:09+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-022", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不要系统", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:09:47+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要系统", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:09:47+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要系统", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:09:47+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-023", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}, {"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "mem-024", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不看带变身的书", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:12:37+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不看带变身的书", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:12:37+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-025", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不要机甲", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:13:37+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要机甲", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:13:37+00:00"}, {"kind": "negative", "value": "不要僵尸题材", "persistent": true, "turn": 2, "written_at": "2026-10-12T17:13:38+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要机甲", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:13:37+00:00"}, {"kind": "negative", "value": "不要僵尸题材", "persistent": true, "turn": 2, "written_at": "2026-10-12T17:13:38+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-026", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}, {"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "mem-027", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不要系统", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:15:31+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要系统", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:15:31+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-028", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不要兽人", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:16:26+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要兽人", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:16:26+00:00"}, {"kind": "negative", "value": "不要异能", "persistent": true, "turn": 2, "written_at": "2026-10-12T17:16:28+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不要兽人", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:16:26+00:00"}, {"kind": "negative", "value": "不要异能", "persistent": true, "turn": 2, "written_at": "2026-10-12T17:16:28+00:00"}], "read": [], "note": []}]}
+{"task_id": "mem-029", "memory_states": [{"positive": [], "negative": [], "read": [], "note": []}, {"positive": [], "negative": [], "read": [], "note": []}]}
+{"task_id": "mem-030", "memory_states": [{"positive": [], "negative": [{"kind": "negative", "value": "不看带僵尸的书", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:18:15+00:00"}], "read": [], "note": []}, {"positive": [], "negative": [{"kind": "negative", "value": "不看带僵尸的书", "persistent": true, "turn": 1, "written_at": "2026-10-12T17:18:15+00:00"}], "read": [], "note": []}]}

@@ -68,7 +68,7 @@
 
 两层分开评，失败才能归因：是索引没把候选给够，还是 agent 没按流程用工具。
 
-- **agent 阶段**（`src/agent_eval/`、`eval/agent/tasks/`、`docs/agent-dev-rounds.md`）：约束推荐（题材 + 正向特征 + 1–2 个负向：推荐数、是否来自检索结果、每个负向是否逐本核查、规则能判的是否违反）和跨轮记忆（长期 / 累积 / 仅本次：记忆文件与后续推荐）两类，模板加词表合成，固定种子切 test 75 / dev 20。两轮 dev：Qwen3.8-Flash 0.55 → 0.75，Qwen3.7-Plus 0.30 → 0.70，中间修了五处；Flash 定为主模型，本地 Qwen3.5-9B 作对照。test 75 条 Flash 通过率 0.867（finish 0.98，逐本核查覆盖 0.96 / 0.95；`docs/agent-test.md` 有逐条归因），9B 对照未跑。
+- **agent 阶段**（`src/agent_eval/`、`eval/agent/tasks/`、`docs/agent-dev-rounds.md`）：约束推荐（题材 + 正向特征 + 1–2 个负向：推荐数、是否来自检索结果、每个负向是否逐本核查、规则能判的是否违反）和跨轮记忆（长期 / 累积 / 仅本次：记忆文件与后续推荐）两类，模板加词表合成，固定种子切 test 75 / dev 20。两轮 dev：Qwen3.8-Flash 0.55 → 0.75，Qwen3.7-Plus 0.30 → 0.70，中间修了五处；Flash 定为主模型，本地 Qwen3.5-9B 作对照。test 75 条：Flash 通过率 0.867（finish 0.98，逐本核查覆盖 0.96 / 0.95），本地 9B 对照 0.227（finish 0.66，主要败在用文字代替 finish、分不清两个核查工具、不用记忆）；`docs/agent-test.md` 有逐条归因。
 - **索引阶段**（`src/retrieval/supply.py`、`supply_judge.py`、`docs/retrieval-supply.md`）：按 agent 的实际用法评候选供给，查询取 agent 在轨迹里真实发出的检索词，指标是 top-k 正向精确率、可行性（扣掉违反负向的还剩不剩 3 本）、锚点命中、卡一致率、改写鲁棒性，相关性由池化判定加人工校准给出。4B 索引上尚未跑。
 - 当前任务集只覆盖「流程对不对」；真实感请求集、书内问答、追问与澄清、推荐质量 judge 是下一阶段。
 
@@ -107,8 +107,8 @@ uv run python scripts/36_agent_metrics.py --run-id dev-01 --tasks eval/agent/tas
 模型调用走 `INOVELREC_LLM_API_KEY` 或 `--api-key-file`，端点走 `INOVELREC_LLM_BASE_URL`。
 开发在 Mac；建卡、建索引、跑 agent 和界面服务在一台 RTX 4080 的 Windows 机器上。
 
-## 现状（2026-10-12）
+## 现状（2026-10-13）
 
-已完成：digest v2、书卡 v3.2、4B 多向量索引与池化单向量索引、按自然语言对话改造的 agent 层、两轮 dev 评测与模型选择、多会话网页界面并在真实索引上跑通。
-进行中：9B 对照；索引阶段候选供给评测在 4B 索引上的首轮；test 暴露的三处提示修正（违反即不推、记忆项推荐前重核、只写记忆也要 finish）。
+已完成：digest v2、书卡 v3.2、4B 多向量索引与池化单向量索引、按自然语言对话改造的 agent 层、两轮 dev 评测与模型选择、test 上 Flash 与 9B 的对照、多会话网页界面并在真实索引上跑通。
+进行中：索引阶段候选供给评测在 4B 索引上的首轮；test 暴露的三处提示修正（违反即不推、记忆项推荐前重核、只写记忆也要 finish）。
 下一步：真实感请求集与新任务类型（书内问答、追问、澄清）、推荐质量 judge；按需建全书段落索引。

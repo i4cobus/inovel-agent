@@ -1,4 +1,4 @@
-# agent 侧 test 评测：Qwen3.8-Flash（2026-10-12）
+# agent 侧 test 评测：Qwen3.8-Flash 与 9B 对照（2026-10-12/13）
 
 第一次在 test 切分上跑的正式数字。两轮 dev 的过程和模型选择见 `docs/agent-dev-rounds.md`；任务构造见 `src/agent_eval/tasks.py`。
 test 的规则：每个模型配置只跑一次，跑前不改提示；本轮之前最后一次提示改动是 2026-10-12 晚界面首轮暴露的四处（同一文档末尾）。
@@ -66,4 +66,23 @@ test 的规则：每个模型配置只跑一次，跑前不改提示；本轮之
 3. `mem-016` 那种只写记忆不 finish 的情况，nudge 之后仍没 finish；考虑在 loop 里对「只调了 memory_write 的步」强制追加 finish 提示。
 4. 10 步预算对 mixed 任务偏紧：把 `max_steps` 提到 12 或者让 search_books 一次返回更多候选，先在 dev 上比。
 
-9B 对照（`qwen3.5:9b`，本地 Ollama，编码器走 CPU）尚未跑，等界面空闲时段。
+## 9B 对照（2026-10-13）
+
+同一套 75 条任务、同一提示、同一 commit（d4042c2），模型换成本地 Qwen3.5-9B（Ollama `qwen3.5:9b` 4-bit，`OLLAMA_CONTEXT_LENGTH=32768`，thinking 关），查询编码器走 CPU，单并发；运行 `test-9b-01`，02:55–03:49 ACDT，54 分钟，不花钱。记录在 `eval/agent/runs/test-9b-01/`。
+
+| 模型 | 通过率 | finish 率 | 步数/会话 | 提示 token/会话 | check_term 覆盖 | check_trope 覆盖 | 规则违反率 | 耗时 / 费用 |
+|---|---|---|---|---|---|---|---|---|
+| Qwen3.8-Flash | **0.867** | 0.981 | 6.06 | 42,390 | 0.962 | 0.950 | 0.012 | 17 分钟（6 并发）/ ¥4.1 |
+| Qwen3.5-9B | 0.227 | 0.664 | 6.90 | 50,720 | 0.399 | 0.815 | 0.021 | 54 分钟（单并发）/ 0 |
+
+9B 分组：约束推荐 0.28（in_text 0.25、meta 0.43、mixed 0.20），记忆 0.12（persist 0.0、accumulate 0.0、oneoff 0.375）。失败标签：no_recommendation 32、tool_skipped 28、format 28、budget_exhausted 7、loop 5、constraint_violated 4、memory_missed 2。
+
+9B 不是「做得差一点」，而是协议层面没跟上，三件事把分数拉没了：
+
+1. **用文字回答代替 finish**（24 个会话 `answer_without_finish`，另 7 个耗尽步数、5 个循环）：核查做完后直接写一段带书单的 markdown，nudge 之后回一句「抱歉，我理解错了流程」再写一遍 markdown，仍不调 finish。文字里的书单评分程序不认，所以同时落 format 和 no_recommendation。Flash 的 107 个会话里文字步只有 16 步，9B 有 68 步。
+2. **分不清两个核查工具**：对直播、系统、超能力、变身、穿越、重生这类文中词也调 `check_trope`，372 次里 147 次返回 `unknown_trope`（Flash 213 次里 1 次）；`check_term` 只调了 185 次（Flash 373）。工具描述已经列出了 27 个可判标签并说明文中词用 check_term，9B 不按它选。check_term 覆盖 0.40 就是这么来的。
+3. **记忆基本不用**：`memory_write` 22 次、`memory_read` 1 次（Flash 49 / 34），持久化与累积两类全军覆没。
+
+finish 本身能调时结构大多完整（71 次 finish 里 3 本及以上 57 次，0 本 9 次），规则违反率和 Flash 同一水平，说明差的不是判断，是流程遵守。这和 dev 轮 Plus 的失败形态（finish 率 0.79、check_trope 覆盖 0.13）同类，只是更重。
+
+对 9B 要再上台阶，提示不够，要么在 loop 里加硬约束（文字回答里出现书单就强制改走 finish、check_trope 收到 unknown_trope 时自动转 check_term），要么做 SFT；两条都不在当前计划里，9B 保持对照 arm 的角色。
