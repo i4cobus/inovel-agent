@@ -8,11 +8,12 @@
   :root {
     --paper: #f3eee4; --panel: #faf7f1; --line: #ddd4c4; --ink: #2a2521; --muted: #7d7368; --faint: #a69c8f;
     --accent: #9c3f1e; --accent-soft: #efe0d2; --user: #e8e1d3; --warn: #a33a2a;
+    --teal: #3d6b68; --teal-soft: #dfe9e6; --olive: #6f6a2e; --olive-soft: #ebe8d6;
     --serif: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "Noto Serif SC", "STSong", "SimSun", Georgia, "Times New Roman", serif;
     --mono: "SF Mono", Menlo, Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --paper: #161411; --panel: #1d1a16; --line: #35302a; --ink: #e9e2d5; --muted: #9f9588; --faint: #6f675d; --accent: #d9956c; --accent-soft: #3a2a1e; --user: #262f28; --warn: #d4654f; }
+    :root { --paper: #161411; --panel: #1d1a16; --line: #35302a; --ink: #e9e2d5; --muted: #9f9588; --faint: #6f675d; --accent: #d9956c; --accent-soft: #3a2a1e; --user: #262f28; --warn: #d4654f; --teal: #8fc2bd; --teal-soft: #1f2d2c; --olive: #c9c37a; --olive-soft: #2b2a1c; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--serif); font-size: 16px; line-height: 1.75; height: 100vh; display: grid; grid-template-columns: 240px 1fr 260px; }
@@ -51,22 +52,20 @@
   #panel h3 { margin: 0 0 2px; font-size: 22px; font-weight: 500; }
   #panel .genre { color: var(--muted); margin-bottom: 12px; }
   #panel .why { border-left: 2px solid var(--accent); padding-left: 10px; color: var(--ink); margin: 10px 0 16px; font-size: 15px; }
-  #panel h4 { font-size: 12px; color: var(--faint); margin: 14px 0 4px; font-weight: 500; letter-spacing: .1em; }
-  #panel .row { font-size: 14px; }
-  #panel .blurb { font-size: 14px; color: var(--muted); white-space: pre-wrap; line-height: 1.7; }
-  .cites { font-size: 13px; color: var(--muted); margin-top: 8px; }
-  .trace { margin-top: 10px; font-size: 13px; }
-  .trace summary { color: var(--faint); cursor: pointer; user-select: none; list-style: none; }
-  .trace summary::before { content: "▸ "; } .trace[open] summary::before { content: "▾ "; }
-  .step { margin: 4px 0 0 6px; padding-left: 12px; border-left: 1px solid var(--line); }
-  .step .say { color: var(--muted); white-space: pre-wrap; }
-  .call { margin: 2px 0; color: var(--muted); word-break: break-all; }
-  .call .fn { color: var(--accent); font-family: var(--mono); font-size: 12px; margin-right: 6px; }
-  .call .arg { color: var(--ink); }
-  .call .res::before { content: " → "; color: var(--faint); }
-  .call .err { color: var(--warn); }
-  .call .err::before { content: " ✗ "; }
-  .status { font-size: 13px; color: var(--warn); margin-top: 6px; }
+  #panel h4 { font-size: 12px; margin: 18px 0 6px; font-weight: 500; letter-spacing: .1em; display: flex; align-items: center; gap: 8px; }
+  #panel h4::after { content: ""; flex: 1; height: 1px; background: currentColor; opacity: .25; }
+  #panel .sec-el h4 { color: var(--accent); }
+  #panel .sec-el .tag { border-color: transparent; background: var(--accent-soft); color: var(--accent); }
+  #panel .sec-style h4 { color: var(--teal); }
+  #panel .sec-style .row .k { color: var(--teal); }
+  #panel .sec-style .row .v { background: var(--teal-soft); border-radius: 4px; padding: 0 7px; }
+  #panel .sec-card h4 { color: var(--olive); }
+  #panel .sec-card .row .k { color: var(--olive); }
+  #panel .sec-blurb h4 { color: var(--muted); }
+  #panel .row { font-size: 14px; display: flex; gap: 10px; align-items: baseline; margin: 3px 0; }
+  #panel .row .k { flex: 0 0 4em; font-size: 13px; }
+  #panel .row .v { flex: 1; min-width: 0; }
+  #panel .blurb { font-size: 14px; color: var(--muted); white-space: pre-wrap; line-height: 1.7; background: var(--paper); border-radius: 6px; padding: 10px 12px; }
   .live::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-right: 8px; animation: pulse 1.2s infinite; vertical-align: middle; }
   @keyframes pulse { 50% { opacity: .15; } }
   form { display: flex; gap: 10px; padding: 14px 28px 20px; }
@@ -303,16 +302,17 @@ async function openBook(id, why) {
   try {
     const b = bookCache[id] || (bookCache[id] = await api(`/api/books/${id}`));
     const c = b.card || {};
-    const style = Object.entries(c.style || {}).filter(([, v]) => v).map(([k, v]) => `${esc(k)} ${esc(v)}`).join("　");
-    const rows = [["主角", c.protagonist], ["背景", c.setting], ["气质", c.tone], ["一句话", c.one_liner]].filter(([, v]) => v);
+    const styleRows = Object.entries(c.style || {}).filter(([, v]) => v);
+    const cardRows = [["主角", c.protagonist], ["背景", c.setting], ["气质", c.tone], ["一句话", c.one_liner]].filter(([, v]) => v);
+    const row = ([k, v]) => `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
     body.innerHTML = `
       <h3>${esc(bare(b.title) || id)}</h3>
       <div class="genre">${esc(c.genre || "")}${c.subgenre ? " · " + esc(c.subgenre) : ""}</div>
       ${why ? `<div class="why">${esc(why)}</div>` : ""}
-      ${(c.elements || []).length ? `<h4>元素</h4><div>${c.elements.map((e) => `<span class="tag">${esc(e)}</span>`).join("")}</div>` : ""}
-      ${style ? `<h4>风格</h4><div class="row">${style}</div>` : ""}
-      ${rows.length ? `<h4>书卡</h4>${rows.map(([k, v]) => `<div class="row"><span class="kind">${k}</span>${esc(v)}</div>`).join("")}` : ""}
-      ${b.blurb ? `<h4>简介</h4><div class="blurb">${esc(b.blurb)}</div>` : ""}
+      ${(c.elements || []).length ? `<div class="sec-el"><h4>元素</h4><div>${c.elements.map((e) => `<span class="tag">${esc(e)}</span>`).join("")}</div></div>` : ""}
+      ${styleRows.length ? `<div class="sec-style"><h4>风格</h4>${styleRows.map(row).join("")}</div>` : ""}
+      ${cardRows.length ? `<div class="sec-card"><h4>概要</h4>${cardRows.map(row).join("")}</div>` : ""}
+      ${b.blurb ? `<div class="sec-blurb"><h4>简介</h4><div class="blurb">${esc(b.blurb)}</div></div>` : ""}
       ${!b.card && !b.blurb ? '<div class="empty">这本书没有书卡</div>' : ""}`;
   } catch (e) { body.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
