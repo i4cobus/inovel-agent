@@ -412,14 +412,15 @@ def build_check_trope(judge: TropeJudge) -> ToolSpec:
             return {**result, "quotes": [text_fingerprint(str(quote)) for quote in result["quotes"]]}
         return result
 
+    known = "、".join(sorted(getattr(judge, "glossary", {}) or ())) or "见词表"
     return ToolSpec(
         name="check_trope",
-        description="判断一本书是否属于某个题材或风格标签（后宫、种马、爽文、圣母、无脑等）。先查离线书卡（source=card，题材 / 元素 / 风格五维能直接回答的），书卡没说的再从全书采样证据由模型判断（source=text，附引文）。结论是 yes、no 或 unclear。",
+        description=f"核查一本书是否带某个套路或风格标签，用于用户明确不要的东西。能判的标签只有：{known}。先查离线书卡（source=card，题材 / 元素 / 风格五维能直接回答的），书卡没说的再从全书采样证据由模型判断（source=text，附引文）。结论是 yes、no 或 unclear。",
         parameters={
             "type": "object",
             "properties": {
                 "novel_id": {"type": "string"},
-                "trope": {"type": "string", "description": "一个标签，例如 后宫"},
+                "trope": {"type": "string", "description": "上面列出的标签之一"},
             },
             "required": ["novel_id", "trope"],
         },

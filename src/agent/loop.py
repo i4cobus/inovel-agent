@@ -52,7 +52,7 @@ FINISH_SCHEMA: dict[str, Any] = {
                         "properties": {
                             "novel_id": {"type": "string"},
                             "title": {"type": "string"},
-                            "reason": {"type": "string", "description": "为什么推荐，以及负向约束是怎么核查的"},
+                            "reason": {"type": "string", "description": "为什么推荐，一两句用户能懂的话；不写工具名和内部结果"},
                         },
                         "required": ["novel_id", "title"],
                     },
