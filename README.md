@@ -8,8 +8,9 @@
 
 ## 演示
 
-<!-- 演示视频：录好后把链接放在下面这一行；视频里只出现书名、书卡字段和 agent 的回答，不出现原文段落 -->
-演示视频：待补
+演示视频（2 分 48 秒，无声）：[`demo/demo.mp4`](demo/demo.mp4)
+
+https://github.com/i4cobus/inovel-agent/raw/master/demo/demo.mp4
 
 ![界面](demo/ui.jpg)
 

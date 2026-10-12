@@ -12,8 +12,9 @@ vectors) is extracted from the text offline, and the agent only consumes those a
 
 ## Demo
 
-<!-- demo video: link goes on the next line once recorded; the video shows titles, card fields and the agent's own words, never passages of the text -->
-Demo video: to be added
+Demo video (2:48, silent): [`demo/demo.mp4`](demo/demo.mp4)
+
+https://github.com/i4cobus/inovel-agent/raw/master/demo/demo.mp4
 
 ![UI](demo/ui.jpg)
 
