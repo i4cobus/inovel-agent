@@ -15,7 +15,7 @@ raw text ──02──▶ digest (~40k chars per book: synopsis + 4 whole openi
                   ├──32──▶ book card (an LLM fills a closed three-layer vocabulary per book)
                   └──30──▶ multi-vector index (digest cut into ≤1,500-char paragraph chunks + the card, Qwen3-Embedding-4B)
                              └──33──▶ pooled single-vector index (the agent's default)
-agent (a hosted API model; local Qwen3.5-9B as the comparison arm) ──▶ search_books / similar_books / get_profile / ask_book / check_term / check_trope / set_aside / memory_read / memory_write
+agent (Qwen3.8-Flash; local Qwen3.5-9B as the comparison arm) ──▶ search_books / similar_books / get_profile / ask_book / check_term / check_trope / set_aside / memory_read / memory_write
 ```
 
 **Digest** (`src/digest.py`): a deterministic sample that stands in for a book of several
@@ -100,7 +100,7 @@ Digest v2, book cards v3.2 (7,410 cards; 245 books rejected by the endpoint's co
 left without one), the 4B multi-vector index (294,485 vectors including the card sections) and
 the pooled single-vector index are built; the agent defaults to `single_4b`. The agent layer has
 been reworked for natural-language conversation (card filters, similar books, session state,
-`ask_book`, question-style finish) and the main model moved to a hosted API, with the local 9B
-kept as a comparison arm. Neither the dev evaluation nor the index-stage candidate-supply
-evaluation has produced numbers yet. A build-on-demand full-book passage index, follow-up and
+`ask_book`, question-style finish) and the main model is Qwen3.8-Flash (chosen over Qwen3.7-Plus after two dev rounds,
+`docs/agent-dev-rounds.md`), with the local 9B kept as the comparison arm. The test split and the
+index-stage candidate-supply evaluation have not been run yet. A build-on-demand full-book passage index, follow-up and
 clarification task types, and a UI are next.

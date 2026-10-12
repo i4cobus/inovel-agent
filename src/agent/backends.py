@@ -9,6 +9,7 @@ never call ``build_agent``; they assemble the same pieces from stubs.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Any, Callable
@@ -35,8 +36,12 @@ from src.retrieval.cards import DEFAULT_CARDS_PATH
 from src.vector_index import DEFAULT_PROFILES_PATH
 
 DEFAULT_DENSITY_PATH = PROCESSED_DATA_DIR / "term_density.parquet"
-DEFAULT_CHAT_BASE_URL = "http://127.0.0.1:11434/v1"  # Ollama's OpenAI-compatible endpoint
-DEFAULT_AGENT_MODEL = "qwen3.5:9b"
+# The main agent model is a hosted Qwen3.8-Flash (user decision 2026-10-12 after two dev rounds; docs/agent-dev-rounds.md);
+# the local Ollama qwen3.5:9b is the comparison arm. The endpoint comes from INOVELREC_LLM_BASE_URL (OpenAI-compatible),
+# falling back to Ollama so `--model qwen3.5:9b` needs nothing else; the key from INOVELREC_LLM_API_KEY or --api-key-file.
+DEFAULT_CHAT_BASE_URL = os.environ.get("INOVELREC_LLM_BASE_URL", "http://127.0.0.1:11434/v1")
+DEFAULT_AGENT_MODEL = "qwen3.8-flash"
+COMPARISON_AGENT_MODEL = "qwen3.5:9b"
 
 
 class ParquetProfiles:

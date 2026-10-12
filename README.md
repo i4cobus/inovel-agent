@@ -14,7 +14,7 @@
                   │
                   └──30──▶ 多向量索引（digest 按段落切成 ≤1,500 字块 + 卡段，Qwen3-Embedding-4B）
                              └──33──▶ 池化单向量索引（agent 默认用这个）
-agent（API 模型为主，本地 Qwen3.5-9B 作对照）──▶ search_books / similar_books / get_profile / ask_book / check_term / check_trope / set_aside / memory_read / memory_write
+agent（Qwen3.8-Flash，本地 Qwen3.5-9B 作对照）──▶ search_books / similar_books / get_profile / ask_book / check_term / check_trope / set_aside / memory_read / memory_write
 ```
 
 ### digest
@@ -81,9 +81,10 @@ uv run python scripts/32_build_book_cards.py --model qwen3.8-flash --base-url <O
 uv run python scripts/30_build_book_indexes.py --dense multi --cards data/processed/book_cards_flash.parquet --dtype bf16 --batch-size 8
 #   书卡还没建好时：先不带 --cards 建，之后 scripts/30b_append_card_sections.py --index-dir <目录> 只嵌入书卡段并追加（平铺内积索引，结果与一起建相同）
 uv run python scripts/33_pool_single_from_multi.py --kind-mean
-uv run python scripts/chat.py --model qwen3.7-plus --base-url <OpenAI 兼容地址> --api-key-file ~/.config/aliyun.key --no-thinking
-uv run python scripts/chat.py                            # 默认本地 Ollama qwen3.5:9b
-uv run python scripts/35_run_agent_eval.py --run-id dev-01 --tasks eval/agent/tasks/constrained_rec.jsonl --model qwen3.7-plus --base-url <地址> --api-key-file <key> --no-thinking --workers 8
+uv run python scripts/chat.py --base-url <OpenAI 兼容地址> --api-key-file <key 文件> --no-thinking   # 默认模型 qwen3.8-flash；端点也可用 INOVELREC_LLM_BASE_URL
+uv run python scripts/chat.py --model qwen3.5:9b                                                # 对照 arm：本地 Ollama
+uv run python scripts/35_run_agent_eval.py --run-id dev-01 --tasks eval/agent/tasks/constrained_rec.jsonl --base-url <地址> --api-key-file <key> --no-thinking --workers 6
+uv run python scripts/36_agent_metrics.py --run-id dev-01 --tasks eval/agent/tasks/constrained_rec.jsonl   # 硬指标，CPU
 ```
 
 模型调用走 `INOVELREC_LLM_API_KEY` 或 `--api-key-file`，仓库里不含任何凭证。
@@ -92,5 +93,5 @@ uv run python scripts/35_run_agent_eval.py --run-id dev-01 --tasks eval/agent/ta
 ## 现状（2026-10-11）
 
 digest v2、书卡 v3.2（7,410 张，245 本被接口内容审核拒收、不补）、4B 多向量索引（294,485 向量，含书卡段）与池化单向量索引均已建成，agent 默认用 `single_4b`。
-agent 层按自然语言对话改造完毕（书卡过滤、相似书、会话状态、`ask_book`、提问式结束），主模型改为 API 模型，本地 9B 留作对照；dev 评测与索引阶段的候选供给评测尚未跑出数字。
+agent 层按自然语言对话改造完毕（书卡过滤、相似书、会话状态、`ask_book`、提问式结束）；主模型定为 Qwen3.8-Flash（两轮 dev 对比 Qwen3.7-Plus 后选定，`docs/agent-dev-rounds.md`），本地 9B 作对照；test 与索引阶段的候选供给评测尚未跑。
 按需建全书段落索引、追问与澄清类评测任务、界面属于下一步。
