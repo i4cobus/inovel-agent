@@ -108,8 +108,9 @@ the candidates, or did the agent not follow the procedure?
   rule-checkable negative fail) and cross-turn memory (persist / accumulate / one-off), both
   synthesised from templates and vocabularies and split with a fixed seed into test 75 /
   dev 20. Two dev rounds: Qwen3.8-Flash 0.55 → 0.75, Qwen3.7-Plus 0.30 → 0.70, five fixes in
-  between; Flash is the main model, the local Qwen3.5-9B the comparison arm. The test split
-  has not been run yet.
+  between; Flash is the main model, the local Qwen3.5-9B the comparison arm. On the 75 test
+  tasks Flash passes 0.867 (finish 0.98, per-book check coverage 0.96 / 0.95; `docs/agent-test.md`
+  attributes every failure); the 9B arm has not been run.
 - **Index stage** (`src/retrieval/supply.py`, `supply_judge.py`, `docs/retrieval-supply.md`):
   candidate supply as the agent uses it, with the queries the agent actually emitted; top-k
   positive precision, feasibility (do three candidates survive the negatives), anchor hits,
@@ -130,7 +131,7 @@ the candidates, or did the agent not follow the procedure?
 | `scripts/` | 01–02 corpus and digest; 30/30b indexes and card-section append, 31 benchmark, 32 cards, 33 pooling, 34–36 task synthesis / agent eval / metrics, 37 card review page, 40–43 candidate supply; `chat.py` terminal chat, `serve.py` web server |
 | `eval/` | task sets and run records, the v1 queries and human labels |
 | `docs/agent-plan.md` | design document |
-| `docs/agent-rework.md`, `docs/agent-dev-rounds.md` | the agent-layer rework; the two dev rounds, fixes and model choice |
+| `docs/agent-rework.md`, `docs/agent-dev-rounds.md`, `docs/agent-test.md` | the agent-layer rework; the two dev rounds, fixes and model choice; the test result with per-task attribution |
 | `docs/card-schema-v3.md`, `docs/book-cards-pilot.md` | card vocabulary and prompt, pilot history |
 | `docs/retrieval-supply.md`, `docs/retrieval-bench.md` | candidate-supply evaluation design; the v1 benchmark |
 | `docs/v1-reranker/` | the predecessor: reranker post-training (SFT + GRPO) |
@@ -151,7 +152,8 @@ runs and the UI server run on a Windows machine with an RTX 4080.
 Done: digest v2, book cards v3.2, the 4B multi-vector and pooled single-vector indexes, the
 agent layer reworked for natural-language conversation, two dev rounds and the model choice,
 the multi-session web UI running against the real index.
-In progress: the agent-side test run with the 9B comparison; the first candidate-supply
-evaluation on the 4B index.
+In progress: the 9B comparison; the first candidate-supply evaluation on the 4B index; three
+prompt fixes the test exposed (a book the check marks as violating is not recommended, remembered
+exclusions are re-checked before recommending, a memory-only turn still ends with finish).
 Next: a realistic request set and new task types (in-book QA, follow-ups, clarification), a
 recommendation-quality judge; a build-on-demand full-book passage index.
