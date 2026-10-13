@@ -18,30 +18,7 @@ Full video: [`demo/demo.mp4`](demo/demo.mp4) · screenshot: [`demo/ui.jpg`](demo
 
 ## Architecture
 
-```
-┌─ offline (once per book, written to disk) ────────────────────────────────────┐
-│  text ──▶ digest ──┬──▶ book card: an LLM fills a closed three-layer vocabulary │
-│         (~40k chars)│      genre 12/41 · 40 elements (quote-verified) · 5 style scales │
-│                     └──▶ multi-vector index: paragraph chunks + card, Qwen3-Embedding-4B │
-│                             └──▶ single-vector index: per-kind mean, then weighted │
-│  term densities (check_term) · profile table (card + synopsis + opening)        │
-└───────────────────────────────────────────────────────────────────────────────┘
-                                        │ shared backends: encoder, both indexes, profiles, densities, judge
-┌─ online ──────────────────────────────┴───────────────────────────────────────┐
-│  agent loop (Qwen3.8-Flash, OpenAI-compatible tool calling)                    │
-│    find    search_books (card filters) · similar_books                        │
-│    verify  check_term (density rule) · check_trope (card, then text)           │
-│    read    get_profile · ask_book (in-book passage retrieval, chapter citations)│
-│    talk    set_aside · memory_read / memory_write · finish                     │
-│  sessions: each one a fork of the loop with its own memory, numbered picks, transcript │
-│  UI: Starlette + one page, steps streamed as they complete, click a title for its card │
-└───────────────────────────────────────────────────────────────────────────────┘
-                                        │
-┌─ evaluation ──────────────────────────┴───────────────────────────────────────┐
-│  index stage: candidate supply (the agent's real queries → top-k precision, feasibility, card consistency) │
-│  agent stage: constrained recommendation + cross-turn memory (program-checked)  │
-└───────────────────────────────────────────────────────────────────────────────┘
-```
+![architecture](docs/img/architecture.en.svg)
 
 ### Offline
 
