@@ -37,3 +37,13 @@ dev 只有 20 条，一条任务等于 5 个百分点，0.75 对 0.70 本身分�
 4. **推荐理由带工具名**：reason 里出现「check_trope(后宫)=no；感情线=无」。finish 的 reason 描述和提示都改为「用用户能懂的话，不写工具名和内部结果」。
 
 另外界面侧：书名模型自带《》，卡片不再重复包一层；会话只重放最近 8 轮。
+
+## test 后的三处修正（2026-10-26，待 dev 验证）
+
+test（`docs/agent-test.md`）归因出的三类模型失误，改法各不相同，都不碰 test 的任务集：
+
+1. **核了却照推**（rec-069 / rec-081）：提示里明写「判为违反的书不能进 recommendations」；另外在 loop 里加一道硬门：本轮 `check_term` 返回 `violates: true` 或 `check_trope` 返回 `yes` 的书，若出现在 finish 的 recommendations 里，finish 被拒一次，错误信息复述证据，要求换书或说明；同一本书第二次提交就放行（给「核查的其实是用户想要的元素」留出口，也不会死循环）。`AgentConfig.refuse_violating_recommendations` 可关。代价：触发时多花一步。
+2. **换题材后忘了核记忆里的条件**（mem-003 / mem-012）：提示里把负向条件的来源写成两个（当场说的 + 长期记忆的「不要」项），并说明换题材、换一轮也要对每本新书核；长期记忆块的标题同样加了这句。
+3. **只写记忆不 finish**（mem-016，nudge 之后仍只回文字）：某一步只调了 memory_write / memory_read / set_aside 时，下一步前的系统提示由「还剩 N 步」换成「记忆已更新，直接用 finish 结束」；nudge 文案改成「把刚才那段话放进 finish 的 answer」。
+
+`max_steps` 维持 10，第 4 项（mixed 任务步数偏紧）这轮不动，便于归因。验证：dev 20 条、Flash、与第二轮 dev 同配置，比较 0.75。

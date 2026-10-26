@@ -179,3 +179,74 @@ def test_extract_trailing_json_takes_the_last_object() -> None:
     assert extract_trailing_json('先说 {"a": 1}，最后 {"b": 2}') == {"b": 2}
     assert extract_trailing_json("没有 JSON") is None
     assert extract_trailing_json('{"a": [1, 2]} 尾巴') == {"a": [1, 2]}
+
+
+def registry_with_checks() -> ToolRegistry:
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            name="check_term",
+            description="t",
+            parameters={"type": "object", "properties": {"novel_id": {"type": "string"}, "terms": {"type": "array"}}, "required": ["novel_id", "terms"]},
+            handler=lambda novel_id, terms: {"novel_id": novel_id, "violates": novel_id == "bad", "evidence": {t: 3.5 for t in terms}, "not_checkable": [], "note": ""},
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="check_trope",
+            description="t",
+            parameters={"type": "object", "properties": {"novel_id": {"type": "string"}, "trope": {"type": "string"}}, "required": ["novel_id", "trope"]},
+            handler=lambda novel_id, trope: {"novel_id": novel_id, "trope": trope, "verdict": "yes" if novel_id == "harem" else "no", "quotes": []},
+        )
+    )
+    registry.register(ToolSpec(name="memory_write", description="m", parameters={"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]}, handler=lambda value: {"written": value}))
+    return registry
+
+
+def finish_with(*ids: str) -> ToolCall:
+    return call("finish", {"answer": "推荐如下", "recommendations": [{"novel_id": i, "title": f"《{i}》"} for i in ids]}, "f")
+
+
+def test_finish_recommending_a_book_check_term_marked_violating_is_refused_once_with_the_evidence() -> None:
+    model = ScriptedModel([
+        turn(calls=(call("check_term", {"novel_id": "bad", "terms": ["重生"]}, "c1"), call("check_term", {"novel_id": "ok", "terms": ["重生"]}, "c2"))),
+        turn(calls=(finish_with("bad", "ok"),)),
+        turn(calls=(finish_with("ok", "other"),)),
+    ])
+    run = AgentLoop(model, registry_with_checks(), UserMemory(), AgentConfig(max_steps=6)).run("不要重生")
+    traj = run.trajectory
+    refused = traj.steps[1].observations[0]
+    assert refused.error is not None and "《bad》" in refused.error and "重生 密度 3.5" in refused.error and "《ok》" not in refused.error
+    assert traj.termination == "finish"
+    assert [r["novel_id"] for r in traj.structured["recommendations"]] == ["ok", "other"]
+    # The refusal reached the model as the tool message for the finish call.
+    assert "不能这样推荐" in [m for m in model.seen[2] if m["role"] == "tool"][-1]["content"]
+
+
+def test_resubmitting_the_same_book_after_the_refusal_is_accepted_and_check_trope_yes_counts_too() -> None:
+    model = ScriptedModel([
+        turn(calls=(call("check_trope", {"novel_id": "harem", "trope": "后宫"}, "c1"),)),
+        turn(calls=(finish_with("harem"),)),
+        turn(calls=(finish_with("harem"),)),
+    ])
+    traj = AgentLoop(model, registry_with_checks(), UserMemory(), AgentConfig(max_steps=6)).run("不要后宫").trajectory
+    assert "后宫" in traj.steps[1].observations[0].error
+    assert traj.termination == "finish" and traj.step_count == 3
+    assert traj.structured["recommendations"][0]["novel_id"] == "harem"
+
+
+def test_the_refusal_can_be_switched_off() -> None:
+    model = ScriptedModel([turn(calls=(call("check_term", {"novel_id": "bad", "terms": ["系统"]}, "c1"),)), turn(calls=(finish_with("bad"),))])
+    traj = AgentLoop(model, registry_with_checks(), UserMemory(), AgentConfig(max_steps=6, refuse_violating_recommendations=False)).run("x").trajectory
+    assert traj.termination == "finish" and traj.step_count == 2
+
+
+def test_a_memory_only_step_is_followed_by_the_finish_hint_instead_of_the_step_counter() -> None:
+    model = ScriptedModel([
+        turn(calls=(call("memory_write", {"value": "不要穿越"}, "c1"),)),
+        turn(calls=(call("finish", {"answer": "已记住：不要穿越。想看什么？", "asks_user": True}, "f"),)),
+    ])
+    run = AgentLoop(model, registry_with_checks(), UserMemory(), AgentConfig(max_steps=6)).run("以后都不要穿越")
+    last_user = [m for m in model.seen[1] if m["role"] == "user"][-1]["content"]
+    assert last_user.startswith("记忆已更新") and "finish" in last_user
+    assert run.trajectory.termination == "finish" and run.trajectory.structured["asks_user"] is True

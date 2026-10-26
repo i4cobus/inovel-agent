@@ -72,8 +72,25 @@ FINISH_SCHEMA: dict[str, Any] = {
         },
     },
 }
-NUDGE = "你刚才没有调用任何工具，也没有用 finish 结束。请继续：需要更多信息就调用工具；信息够了、或者只是确认、或者需要用户补充信息，都要调用 finish（需要用户回答时 asks_user=true）。"
+NUDGE = "你刚才没有调用任何工具，也没有用 finish 结束。对话只有调用 finish 才算回答：把你刚才那段话放进 finish 的 answer（需要用户回答时 asks_user=true）；还需要更多信息就调用工具。"
+MEMORY_ONLY_HINT = "记忆已更新。这一步没有检索，直接用 finish 结束这一轮：answer 里确认已记住什么，并问用户现在想看什么（asks_user=true）。"
+MEMORY_ONLY_TOOLS = frozenset({"memory_write", "memory_read", "set_aside"})
 LAST_STEP = "这是最后一步，步数已用尽。现在必须调用 finish，用已经掌握的信息给出最终回答；没能确认的偏好在 answer 里说明。"
+
+
+def _note_violation(violations: dict[str, list[str]], tool: str, arguments: dict[str, Any] | None, result: Any) -> None:
+    """Remember a check that came back as a violation, keyed by novel_id, so a later finish can be held to it."""
+    if not isinstance(result, dict) or not arguments:
+        return
+    novel_id = str(result.get("novel_id") or arguments.get("novel_id") or "")
+    if not novel_id:
+        return
+    if tool == "check_term" and result.get("violates") is True:
+        evidence = result.get("evidence") or {}
+        terms = "、".join(f"{t} 密度 {d}" for t, d in evidence.items()) or "、".join(map(str, arguments.get("terms") or []))
+        violations.setdefault(novel_id, []).append(f"check_term 判定含有 {terms}")
+    elif tool == "check_trope" and result.get("verdict") == "yes":
+        violations.setdefault(novel_id, []).append(f"check_trope 判定有「{result.get('trope') or arguments.get('trope')}」")
 
 
 def steps_hint(remaining: int) -> str:
@@ -86,6 +103,10 @@ class AgentConfig:
     # A finish call carries the whole answer plus the recommendation list; at 1,024 it was truncated in 9 of 58 dev sessions (2026-10-12).
     max_tokens: int = 4096
     budget: ContextBudget = ContextBudget()
+    # A finish that recommends a book this turn's check_term / check_trope marked as violating is refused once, with the
+    # evidence restated; the model may swap the book or resubmit (the second attempt is accepted). Test 2026-10-12:
+    # rec-069 / rec-081 recommended books check_term had just marked `violates: true`.
+    refuse_violating_recommendations: bool = True
 
 
 @dataclass
@@ -169,6 +190,8 @@ class AgentLoop:
         last_signature: tuple[str, str] | None = None
         last_content = ""
         text_only_streak = 0
+        violations: dict[str, list[str]] = {}  # novel_id -> evidence strings from this turn's checks
+        refused_once: set[str] = set()
 
         tool_names: dict[str, str] = {}
         for index in range(self.config.max_steps):
@@ -176,7 +199,11 @@ class AgentLoop:
             if remaining == 1:
                 messages.append({"role": "user", "content": LAST_STEP})
             elif index > 0 and messages[-1].get("role") == "tool":
-                messages.append({"role": "user", "content": steps_hint(remaining)})
+                previous = trajectory.steps[-1]
+                if previous.tool_calls and all(c["name"] in MEMORY_ONLY_TOOLS for c in previous.tool_calls):
+                    messages.append({"role": "user", "content": MEMORY_ONLY_HINT})
+                else:
+                    messages.append({"role": "user", "content": steps_hint(remaining)})
             started = time.perf_counter()
             try:
                 response = self.model.chat(
@@ -224,8 +251,23 @@ class AgentLoop:
                     observation.error = f"参数不是合法 JSON（如果是回答太长被截断，请精简 answer 后重试）：{call.raw_arguments[:200]}"
                 elif call.name == FINISH_TOOL:
                     answer = str(call.arguments.get("answer", "")).strip()
+                    recs = list(call.arguments.get("recommendations") or [])
+                    flagged = [
+                        r for r in recs
+                        if isinstance(r, dict) and str(r.get("novel_id")) in violations and str(r.get("novel_id")) not in refused_once
+                    ] if self.config.refuse_violating_recommendations else []
                     if not answer:
                         observation.error = "finish 缺少 answer"
+                    elif flagged:
+                        lines = []
+                        for r in flagged:
+                            nid = str(r.get("novel_id"))
+                            refused_once.add(nid)
+                            lines.append(f"{r.get('title') or nid}：{'；'.join(violations[nid])}")
+                        observation.error = (
+                            "这些书在本轮核查里已判为违反用户的条件，不能这样推荐：\n" + "\n".join(lines)
+                            + "\n请换书，或者在 answer 里说明原因后再次 finish；如果核查的其实是用户想要的元素，也请说明后再次 finish。"
+                        )
                     else:
                         observation.result = {"ok": True}
                         trajectory.final_answer = answer
@@ -245,6 +287,7 @@ class AgentLoop:
                         observation.result = self.tools.call(call.name, call.arguments)
                         if self.session is not None and isinstance(observation.result, dict):
                             self.session.note_rows(observation.result.get("results"))
+                        _note_violation(violations, call.name, call.arguments, observation.result)
                     except ToolError as exc:
                         observation.error = str(exc)
                     except Exception as exc:  # noqa: BLE001 - a tool bug must not kill the run
