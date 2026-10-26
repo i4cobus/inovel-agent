@@ -140,6 +140,6 @@ Done: digest v2, book cards v3.2, the 4B multi-vector and pooled single-vector i
 agent layer reworked for natural-language conversation, two dev rounds and the model choice, the
 Flash-versus-9B comparison on the test split, the three fixes the test asked for verified on dev, the
 multi-session web UI running against the real index.
-In progress: the extended task sets (test 307 / dev 85): dev 0.882 and **test 0.840 [0.80, 0.88]** done (`docs/agent-test.md`, second round; the largest failure is a skipped check in the memory tasks); the first candidate-supply evaluation on the 4B index (Qwen3.8-Max as judge, the agent's own queries).
+In progress: the extended task sets (test 307 / dev 85): dev 0.882 and **test 0.840 [0.80, 0.88]** done (`docs/agent-test.md`, second round; the largest failure is a skipped check in the memory tasks); the candidate-supply evaluation has run once (`docs/retrieval-supply.md`: the pool is what the agent saw in the test run, Qwen3.8-Max judged 4,456 pairs; top-10 precision 0.64 strict / 0.94 lenient, recommendation satisfaction 0.88 strict / 0.99 lenient, pass rate 0.83 on tasks with enough candidates against 0.77 without).
 Next: a realistic request set and new task types (in-book QA, follow-ups, clarification), a
 recommendation-quality judge; a build-on-demand full-book passage index.

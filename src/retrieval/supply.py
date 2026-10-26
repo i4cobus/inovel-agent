@@ -533,6 +533,8 @@ def judged_metrics(
             lenient_prec.append(sum(1 for l in labels if l >= 1) / len(labels))
             feasible.append(1.0 if ok_strict >= MIN_FEASIBLE else 0.0)
             feasible_lenient.append(1.0 if ok_lenient >= MIN_FEASIBLE else 0.0)
+        if not strict_prec:
+            continue  # a config with no judged query (the recommendation rows are scored by recommendation_metrics)
         report[config] = {
             "queries_judged": len(strict_prec),
             f"positive_precision@{k}": _mean(strict_prec),

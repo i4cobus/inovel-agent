@@ -1,0 +1,12 @@
+{
+ "at": "2026-10-26T16:40:08.175411+00:00",
+ "requested": 4456,
+ "cache_hits": 1,
+ "judged": 4455,
+ "parse_failed": 0,
+ "request_failed": 0,
+ "skipped_over_budget": 0,
+ "spent": 43.961567999999986,
+ "prompt_tokens": 2967614,
+ "completion_tokens": 231950
+}
