@@ -337,6 +337,37 @@ def score_qa_session(trajectory: Mapping[str, Any], expect: Mapping[str, Any], c
     }
 
 
+def referenced_ids(trajectory: Mapping[str, Any]) -> set[str]:
+    """Books the agent looked at in this session: get_profile, ask_book, check_term, check_trope, similar_books."""
+
+    ids = set()
+    for name in ("get_profile", "ask_book", "check_term", "check_trope", "similar_books"):
+        ids |= {str(c.get("novel_id", "")) for c in tool_calls(trajectory, name)}
+    return ids
+
+
+def session_state_labels(expect: Mapping[str, Any], trajectory: Mapping[str, Any], trajectories: list[Mapping[str, Any]]) -> list[str]:
+    """Cross-session checks for session_state follow-ups; the earlier session's recommendations are the reference."""
+
+    labels: list[str] = []
+    recs = recommended_ids(trajectory)
+    if "disjoint_from" in expect:
+        earlier = recommended_ids(trajectories[int(expect["disjoint_from"])]) if len(trajectories) > int(expect["disjoint_from"]) else []
+        if set(recs) & set(earlier):
+            labels.append("repeat_recommended")
+    if "refers_to" in expect:
+        earlier = recommended_ids(trajectories[0]) if trajectories else []
+        position = int(expect["refers_to"])
+        if len(earlier) >= position and earlier[position - 1] not in referenced_ids(trajectory):
+            labels.append("reference_missed")
+    if "exclude_index" in expect:
+        earlier = recommended_ids(trajectories[0]) if trajectories else []
+        position = int(expect["exclude_index"])
+        if len(earlier) >= position and earlier[position - 1] in recs:
+            labels.append("excluded_recommended")
+    return labels
+
+
 def score_task(
     task: Mapping[str, Any],
     trajectories: list[Mapping[str, Any]],
@@ -351,6 +382,23 @@ def score_task(
     labels: list[str] = []
     for session, trajectory, memory_state in zip(sessions, trajectories, memory_states):
         expect = session.get("expect", {})
+        if task["kind"] == "clarify":
+            score = score_session(trajectory, [], [], densities, require_recommendations=False)
+            structured = trajectory.get("structured") or {}
+            if not structured.get("asks_user"):
+                score.labels.append("no_clarification")
+            if score.n_recs > int(expect.get("max_recommendations", 0)):
+                score.labels.append("recommended_without_asking")
+            labels.extend(score.labels)
+            rows.append(score.to_dict())
+            continue
+        if task["kind"] == "session_state":
+            min_recs = int(expect.get("min_recommendations", 0))
+            score = score_session(trajectory, [], [], densities, min_recommendations=max(min_recs, 1), require_recommendations=min_recs > 0)
+            score.labels.extend(session_state_labels(expect, trajectory, trajectories))
+            labels.extend(score.labels)
+            rows.append(score.to_dict())
+            continue
         if task["kind"] == "book_qa":
             book = (digests or {}).get(str(expect.get("novel_id", "")))
             if book is None:

@@ -43,7 +43,7 @@ from src.retrieval.supply_judge import (
 
 def test_task_and_legacy_queries_load_from_the_committed_files() -> None:
     tasks = task_queries()
-    assert len(tasks) == 95 and all(q.source == "task" and q.positives for q in tasks)
+    assert len(tasks) == 252 and all(q.source == "task" and q.positives for q in tasks)  # 176 constrained_rec + 76 memory after the 2026-10-27 extension
     rec = next(q for q in tasks if q.query_id == "rec-004")
     assert rec.query == "种田 经营 慢节奏 家长里短" and rec.negatives_meta == ("压抑", "后宫") and rec.negatives_in_text == ()
     legacy = legacy_queries()

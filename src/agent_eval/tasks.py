@@ -108,8 +108,8 @@ def _phrase_request(rng: random.Random, genre: str, feats: list[str], negs: list
     ).strip()
 
 
-def synthesize_constrained(n: int, seed: int = 0, id_prefix: str = "rec") -> list[Task]:
-    """Stratified thirds: in-text negatives only, meta negatives only, one of each."""
+def synthesize_constrained(n: int, seed: int = 0, id_prefix: str = "rec", start: int = 0) -> list[Task]:
+    """Stratified thirds: in-text negatives only, meta negatives only, one of each. ``start`` offsets the ids (later batches)."""
 
     rng = random.Random(seed)
     tasks: list[Task] = []
@@ -129,7 +129,7 @@ def synthesize_constrained(n: int, seed: int = 0, id_prefix: str = "rec") -> lis
         rng.shuffle(negs)
         tasks.append(
             Task(
-                task_id=f"{id_prefix}-{index:03d}",
+                task_id=f"{id_prefix}-{start + index:03d}",
                 kind="constrained_rec",
                 split="",
                 sessions=[Session(_phrase_request(rng, genre, feats, negs), expect={"min_recommendations": 3})],
@@ -142,7 +142,7 @@ def synthesize_constrained(n: int, seed: int = 0, id_prefix: str = "rec") -> lis
     return tasks
 
 
-def synthesize_memory(n: int, seed: int = 0, id_prefix: str = "mem") -> list[Task]:
+def synthesize_memory(n: int, seed: int = 0, id_prefix: str = "mem", start: int = 0) -> list[Task]:
     """Three variants, cycled: persist, accumulate, oneoff.
 
     persist:    S1 states a lasting exclusion and asks for books; S2 asks for a different
@@ -162,7 +162,7 @@ def synthesize_memory(n: int, seed: int = 0, id_prefix: str = "mem") -> list[Tas
         genres = rng.sample(sorted(POSITIVE_THEMES), k=2)
         blocked = GENRE_INCOMPATIBLE.get(genres[0], set()) | GENRE_INCOMPATIBLE.get(genres[1], set())
         terms = rng.sample([t for t in IN_TEXT_POOL if t not in blocked], k=2)
-        task_id = f"{id_prefix}-{index:03d}"
+        task_id = f"{id_prefix}-{start + index:03d}"
         if variant == "persist":
             sessions = [
                 Session(f"记住，我以后都不看带{terms[0]}的书。先给我推荐几本{genres[0]}。", {"persist": [terms[0]], "min_recommendations": 1}),
@@ -383,3 +383,66 @@ def synthesize_book_qa(books: dict[str, dict[str, Any]], n: int, seed: int = 0, 
         expect = {"novel_id": novel_id, "answerable": answerable, "gold_chapters": gold}
         tasks.append(Task(task_id=f"{id_prefix}-{index:03d}", kind="book_qa", split="", sessions=[Session(message, expect)], positives=[title], variant=variant, meta=meta))
     return tasks
+
+
+# ---------------------------------------------------------------------------
+# Session state (session_state): 「换几本」「第二本再讲讲」「第一本看过了」 resolve against what this session recommended.
+
+STATE_FIRST_TEMPLATES = ["推荐几本{genre}，要{feats}。", "想看{genre}，{feats}的。", "有没有{feats}的{genre}？来几本。"]
+STATE_FOLLOWUPS = {
+    "more": ["换几本。", "再来几本别的。", "这几本都不太想看，换一批。", "还有别的吗？换几本看看。"],
+    "refer": ["第二本再讲讲。", "第 2 本是讲什么的？", "第二本主角是谁？", "细说一下第二本。"],
+    "exclude": ["第一本看过了，换一本。", "第一本我读过了，补一本别的。", "第 1 本不要，再给一本。"],
+}
+STATE_VARIANTS = ["more", "refer", "exclude"]
+
+
+def synthesize_session_state(n: int, seed: int = 0, id_prefix: str = "ses", start: int = 0) -> list[Task]:
+    """Two sessions: a plain request (no negatives, so the first turn is easy), then a follow-up that only makes sense
+    against the numbered recommendations of the first.
+
+    more:    「换几本」      → ≥3 new books, none of them recommended before (``disjoint_from`` = session 0).
+    refer:   「第二本再讲讲」 → a profile / in-book tool call on the second recommended book (``refers_to`` = 2).
+    exclude: 「第一本看过了」 → the first book is not recommended again and at least one new one is (``exclude_index`` = 1).
+    """
+
+    rng = random.Random(seed)
+    tasks: list[Task] = []
+    for index in range(n):
+        variant = STATE_VARIANTS[index % len(STATE_VARIANTS)]
+        genre = rng.choice(sorted(POSITIVE_THEMES))
+        feats = rng.sample(POSITIVE_THEMES[genre], k=rng.randint(1, 2))
+        first = rng.choice(STATE_FIRST_TEMPLATES).format(genre=genre, feats="、".join(feats))
+        follow = rng.choice(STATE_FOLLOWUPS[variant])
+        if variant == "more":
+            expect = {"min_recommendations": 3, "disjoint_from": 0}
+        elif variant == "refer":
+            expect = {"refers_to": 2}
+        else:
+            expect = {"min_recommendations": 1, "exclude_index": 1}
+        sessions = [Session(first, {"min_recommendations": 3}), Session(follow, expect)]
+        tasks.append(Task(task_id=f"{id_prefix}-{start + index:03d}", kind="session_state", split="", sessions=sessions, positives=[genre, *feats], variant=variant))
+    return tasks
+
+
+# ---------------------------------------------------------------------------
+# Clarification (clarify): a request too vague to act on must end in a question, not in guesses.
+
+CLARIFY_PHRASES = [
+    "推荐点好看的。", "有什么书推荐吗？", "随便来几本。", "最近书荒了。", "来本小说看看。", "有没有好书？", "给我推荐一本。",
+    "想看书，不知道看什么。", "书荒，救救我。", "推荐几本吧。", "有啥好看的？", "来点新书。", "推荐个能打发时间的。",
+    "有没有什么值得一看的？", "最近有什么好书？", "给我找本书。", "随便推荐。", "有书吗？", "看点什么好呢？", "介绍几本呗。",
+]
+
+
+def synthesize_clarify(n: int, seed: int = 0, id_prefix: str = "clr", start: int = 0) -> list[Task]:
+    """One session each, phrasings sampled without replacement: expected to end with asks_user=true and no recommendations."""
+
+    if n > len(CLARIFY_PHRASES):
+        raise ValueError(f"only {len(CLARIFY_PHRASES)} clarification phrasings for {n} tasks")
+    rng = random.Random(seed)
+    phrases = rng.sample(CLARIFY_PHRASES, k=n)
+    return [
+        Task(task_id=f"{id_prefix}-{start + i:03d}", kind="clarify", split="", sessions=[Session(p, {"asks_user": True, "max_recommendations": 0})], variant="vague")
+        for i, p in enumerate(phrases)
+    ]

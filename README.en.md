@@ -83,8 +83,10 @@ the candidates, or did the agent not follow the procedure?
   constrained recommendation (genre + positive features + 1–2 negatives: number of picks,
   were they among the search results, was every negative checked per book, does a
   rule-checkable negative fail) and cross-turn memory (persist / accumulate / one-off), both
-  synthesised from templates and vocabularies and split with a fixed seed into test 75 /
-  dev 20. Four dev rounds: Qwen3.8-Flash 0.55 → 0.75 → 0.80, Qwen3.7-Plus 0.30 → 0.70, eight fixes in
+  synthesised from templates and vocabularies and split with a fixed seed. Extended on 2026-10-27 to five
+  kinds (session state: 「换几本」/ the second one / I have read the first; clarification) with test 307 /
+  dev 85, the original 75 / 20 kept as a subset with unchanged ids (`docs/agent-tasks.md`). The numbers
+  below are on the original 75 / 20. Four dev rounds: Qwen3.8-Flash 0.55 → 0.75 → 0.80, Qwen3.7-Plus 0.30 → 0.70, eight fixes in
   between (the last three from the test's attribution: the loop refuses to recommend a book a check
   marked as violating, remembered exclusions are re-checked like stated ones, a memory write still
   ends with finish); Flash is the main model, the local Qwen3.5-9B the comparison arm. On the 75 test
@@ -132,12 +134,12 @@ Model calls read `INOVELREC_LLM_API_KEY` or `--api-key-file` and the endpoint fr
 `INOVELREC_LLM_BASE_URL`. Development happens on a Mac; card building, index building, agent
 runs and the UI server run on a Windows machine with an RTX 4080.
 
-## Status (2026-10-26)
+## Status (2026-10-27)
 
 Done: digest v2, book cards v3.2, the 4B multi-vector and pooled single-vector indexes, the
 agent layer reworked for natural-language conversation, two dev rounds and the model choice, the
 Flash-versus-9B comparison on the test split, the three fixes the test asked for verified on dev, the
 multi-session web UI running against the real index.
-In progress: the first in-book QA round (dev 15 to calibrate the support threshold, then test); the first candidate-supply evaluation on the 4B index.
+In progress: the first round on the extended task sets (dev first, then the full test); the first candidate-supply evaluation on the 4B index (Qwen3.8-Max as judge, the agent's own queries).
 Next: a realistic request set and new task types (in-book QA, follow-ups, clarification), a
 recommendation-quality judge; a build-on-demand full-book passage index.
