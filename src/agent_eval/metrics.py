@@ -337,12 +337,42 @@ def retrieved_chapters(trajectory: Mapping[str, Any], novel_id: str) -> list[str
     return out
 
 
+QUOTE_RE = re.compile(r"「([^」]{6,})」")
+
+
+def quoted_line(user_message: str) -> str | None:
+    """The line a quote_locate question quotes (between 「 」), or None for other questions."""
+
+    match = QUOTE_RE.search(user_message or "")
+    return match.group(1).strip() if match else None
+
+
+def retrieved_texts(trajectory: Mapping[str, Any], novel_id: str) -> list[str]:
+    """Passage texts ask_book returned for ``novel_id`` (empty on the redacted trajectory, which fingerprints them)."""
+
+    out: list[str] = []
+    for step in trajectory.get("steps", []):
+        for obs in step.get("observations", []):
+            if obs.get("tool") != "ask_book" or str((obs.get("arguments") or {}).get("novel_id", "")) != novel_id:
+                continue
+            for passage in (obs.get("result") or {}).get("passages") or []:
+                if isinstance(passage, dict) and isinstance(passage.get("text"), str):
+                    out.append(passage["text"])
+    return out
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"\s+", "", text)
+
+
 def score_qa_session(trajectory: Mapping[str, Any], expect: Mapping[str, Any], chapters: list[tuple[str, str, str]], user_message: str = "") -> dict[str, Any]:
     """One book_qa session. ``chapters`` are the digest's (kind, heading, text) for the gold book.
 
     Attribution: when ask_book never surfaced a gold chapter the session is labelled ``chapter_not_retrieved`` (the
     tool's limit, no chapter lookup exists) and the model-side citation labels are not applied; only inventing a
-    chapter (``ungrounded_citation``) still counts against the model."""
+    chapter (``ungrounded_citation``) still counts against the model. A quote question whose quoted line is in none
+    of the returned passages (the chapter came back, the window with the line did not) is ``quote_not_retrieved``,
+    attributed the same way; it needs the full trajectory, the redacted copy has no passage text."""
 
     termination = str(trajectory.get("termination", ""))
     labels: list[str] = []
@@ -392,18 +422,30 @@ def score_qa_session(trajectory: Mapping[str, Any], expect: Mapping[str, Any], c
         if profiled:  # the profile text is the opening, so an opening question can be answered from get_profile alone
             seen += [h for kind, h, _ in chapters if kind == "opening"]
         gold_retrieved = any(match_chapter(c, g) for c in seen for g in gold)
+    quote = quoted_line(user_message)
+    if quote and any(match_chapter(quote, g) for g in gold):
+        quote = None  # a chapter_event question quotes the heading, not a line
+    quote_retrieved: bool | None = None
+    if answerable and gold_retrieved and quote:
+        passages = retrieved_texts(trajectory, novel_id)
+        if passages:  # None on the redacted trajectory: the texts are fingerprinted there
+            needle = _squash(quote)[:12]
+            quote_retrieved = any(needle in _squash(text) for text in passages)
     if answerable and not gold_retrieved:
         labels.append("chapter_not_retrieved")
     elif answerable:
+        model_labels: list[str] = []
         if not citations:
-            labels.append("no_citation")
+            model_labels.append("no_citation")
         gold_cited = any(any(match_chapter(c, g) for g in gold) for _, c in citations)
         if citations and not gold_cited:
-            labels.append("gold_not_cited")
+            model_labels.append("gold_not_cited")
         sources = [texts[h] for h in grounded_headings] or [texts[h] for h in headings if any(match_chapter(h, g) for g in gold)]
         support = answer_support(answer, sources, exclude=user_message) if answer is not None else None
         if support is not None and support < ANSWER_SUPPORT_THRESHOLD:
-            labels.append("answer_unsupported")
+            model_labels.append("answer_unsupported")
+        # a miss on a quote the tool never showed is the tool's; a hit despite it (the chapter inferred from context) still counts
+        labels.extend(["quote_not_retrieved"] if model_labels and quote_retrieved is False else model_labels)
     elif answer is not None:
         abstained = bool(ABSTAIN_RE.search(answer))
         if not abstained:
@@ -418,6 +460,7 @@ def score_qa_session(trajectory: Mapping[str, Any], expect: Mapping[str, Any], c
         "n_citations": len(citations),
         "citations_grounded": all_grounded if citations else None,
         "gold_retrieved": gold_retrieved,
+        "quote_retrieved": quote_retrieved,
         "gold_cited": gold_cited,
         "answer_support": support,
         "abstained": abstained,
@@ -582,6 +625,7 @@ def aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
             "unrequested_checks_per_session": round(sum(s.get("unrequested_checks", 0) for s in session_rows) / n_sessions, 2),
             "unrequested_offtopic_per_session": round(sum(s.get("unrequested_offtopic", 0) for s in session_rows) / n_sessions, 2),
             "gold_retrieved_rate": rate([s["gold_retrieved"] for s in qa_rows if s.get("gold_retrieved") is not None]) if qa_rows else None,
+            "quote_retrieved_rate": rate([s["quote_retrieved"] for s in qa_rows if s.get("quote_retrieved") is not None]) if qa_rows else None,
             "book_resolved_rate": rate([s["resolved"] for s in qa_rows]) if qa_rows else None,
             "citation_grounded_rate": rate(grounded),
             "gold_cited_rate": rate(gold_cited),

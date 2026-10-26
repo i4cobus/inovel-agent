@@ -172,3 +172,34 @@ def test_a_gold_chapter_the_tool_never_returned_is_attributed_to_retrieval_not_t
     assert row["labels"] == ["chapter_not_retrieved"] and row["gold_retrieved"] is False and row["gold_cited"] is None
     invented = score_qa_session(trajectory("编的。", [{"novel_id": "id00", "chapter": "第999章"}], returned=("第120章 中段120",)), expect, chapters)
     assert invented["labels"] == ["ungrounded_citation", "chapter_not_retrieved"]
+
+
+def test_quote_question_whose_line_is_not_in_the_returned_window_is_attributed_to_the_tool() -> None:
+    from src.agent_eval.metrics import quoted_line, score_qa_session
+
+    chapters = [("middle", "第二章 夜谈", "第二章 夜谈\n他推门进来，说了一句「今夜无人入眠」，然后坐下。" + "闲话" * 50)]
+    expect = {"novel_id": "n1", "answerable": True, "gold_chapters": ["第二章 夜谈"]}
+    message = "「今夜无人入眠」这句话在《某书》的哪一章？当时发生了什么？"
+    assert quoted_line(message) == "今夜无人入眠" and quoted_line("《某书》开头讲了什么？") is None
+    window = {"chapter": "第二章 夜谈", "text": "第二章 夜谈\n" + "闲话" * 50}  # the chapter came back, the line did not
+    traj = {
+        "termination": "finish",
+        "steps": [{"tool_calls": [{"name": "ask_book", "arguments": {"novel_id": "n1", "question": "今夜无人入眠"}}], "observations": [{"tool": "ask_book", "arguments": {"novel_id": "n1"}, "result": {"passages": [window]}}]}],
+        "structured": {"recommendations": [], "citations": []},
+        "final_answer": "库里这本书的摘录里没有这句话，我没法告诉你它在哪一章。",
+    }
+    row = score_qa_session(traj, expect, chapters, user_message=message)
+    assert row["labels"] == ["quote_not_retrieved"] and row["gold_retrieved"] is True and row["quote_retrieved"] is False
+    # with the line in the window the model-side labels apply again
+    window["text"] = chapters[0][2]
+    row = score_qa_session(traj, expect, chapters, user_message=message)
+    assert row["quote_retrieved"] is True and "quote_not_retrieved" not in row["labels"] and "no_citation" in row["labels"]
+    # the line missing but the chapter cited anyway (inferred from context): a pass, the miss only shows in quote_retrieved
+    window["text"] = "第二章 夜谈\n" + "闲话" * 50
+    traj["structured"]["citations"] = [{"novel_id": "n1", "chapter": "第二章 夜谈"}]
+    traj["final_answer"] = "在第二章 夜谈，他推门进来坐下闲话。"
+    row = score_qa_session(traj, expect, chapters, user_message=message)
+    assert row["labels"] == [] and row["quote_retrieved"] is False and row["gold_cited"] is True
+    # the redacted trajectory has no passage text: no verdict either way
+    window.pop("text")
+    assert score_qa_session(traj, expect, chapters, user_message=message)["quote_retrieved"] is None

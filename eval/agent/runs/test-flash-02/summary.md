@@ -22,4 +22,4 @@
 | variant=refer | 15 | 1.0 [0.80, 1.00] | 1.0 | 4.33 | 31763 | None | None | None | 0.67 | 0.67 | None | None | None | None | None | None |
 | variant=vague | 12 | 0.8333 [0.55, 0.95] | 1.0 | 2.75 | 11284 | None | None | None | 0.25 | 0.25 | None | None | None | None | None | None |
 
-failure labels: tool_skipped=25, no_recommendation=20, format=3, budget_exhausted=2, recommended_without_asking=2, answer_unsupported=2, no_clarification=1, chapter_not_retrieved=1, gold_not_cited=1
+failure labels: tool_skipped=25, no_recommendation=20, format=3, budget_exhausted=2, recommended_without_asking=2, quote_not_retrieved=2, no_clarification=1, chapter_not_retrieved=1
