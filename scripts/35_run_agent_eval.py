@@ -33,7 +33,7 @@ def main(
     model: str = typer.Option(DEFAULT_AGENT_MODEL),
     base_url: str = typer.Option(DEFAULT_CHAT_BASE_URL),
     reasoning_effort: str | None = typer.Option("none"),
-    max_steps: int = typer.Option(10),
+    max_steps: int | None = typer.Option(None, help="Step budget per session; default AgentConfig.max_steps."),
     index_dir: Path = typer.Option(DEFAULT_INDEX_DIR),
     cards: Path | None = typer.Option(DEFAULT_CARDS_PATH, help="Book cards parquet for get_profile; a missing file means no cards."),
     device: str | None = typer.Option("cpu", help="Device for the query embedder; the GPU belongs to the model server."),
@@ -58,9 +58,9 @@ def main(
     extra_body = {"enable_thinking": False} if no_thinking else None
     if no_thinking and reasoning_effort is None:
         reasoning_effort = "none"
-    agent = build_agent(model=model, base_url=base_url, index_dir=index_dir, cards_path=cards, device=device, reasoning_effort=reasoning_effort, api_key=api_key, extra_body=extra_body, multi_dir=multi_dir, config=AgentConfig(max_steps=max_steps))
+    agent = build_agent(model=model, base_url=base_url, index_dir=index_dir, cards_path=cards, device=device, reasoning_effort=reasoning_effort, api_key=api_key, extra_body=extra_body, multi_dir=multi_dir, config=AgentConfig(max_steps=max_steps) if max_steps is not None else AgentConfig())
     console.print(f"ready {agent.info}; {len(selected)} tasks ({split})")
-    config = {"run_id": run_id, "split": split, "model": model, "reasoning_effort": reasoning_effort, "max_steps": max_steps, "index_dir": index_dir.as_posix(), "task_files": [p.as_posix() for p in tasks], **agent.info}
+    config = {"run_id": run_id, "split": split, "model": model, "reasoning_effort": reasoning_effort, "max_steps": agent.config.max_steps, "index_dir": index_dir.as_posix(), "task_files": [p.as_posix() for p in tasks], **agent.info}
 
     def report(task, trajectories) -> None:
         ends = ",".join(t["termination"] for t in trajectories)

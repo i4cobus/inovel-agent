@@ -83,5 +83,5 @@ uv run python scripts/36_agent_metrics.py --run-id dev-01 --tasks eval/agent/tas
 ## 现状（2026-10-27）
 
 已完成：digest v2、书卡 v3.2、4B 多向量索引与池化单向量索引、按自然语言对话改造的 agent 层、两轮 dev 评测与模型选择、test 上 Flash 与 9B 的对照、test 归因出的三处修正并经 dev 验证、多会话网页界面并在真实索引上跑通。
-进行中：扩容后任务集（test 307 / dev 85）：dev 85 条 0.882、**test 307 条 0.840 [0.80, 0.88]** 已跑（`docs/agent-test.md` 第二轮，最大失败项是记忆类的漏核）；索引阶段候选供给评测已跑一轮（`docs/retrieval-supply.md`：池就是 agent 在 test 里看到的候选，Qwen3.8-Max 判 4,456 对；top-10 严格精确率 0.64 / 宽松 0.94，推荐满足率严格 0.88 / 宽松 0.99，候选充足的任务通过 0.83、不足的 0.77）。
+进行中：扩容后任务集（test 307 / dev 85）：dev 85 条 0.882、**test 307 条 0.840 [0.80, 0.88]** 已跑（`docs/agent-test.md` 第二轮，最大失败项是记忆类的漏核）；针对漏核的两处修正在 dev 上验证为 0.906、漏核 6 → 0（`docs/agent-dev-rounds.md` 第六轮，剩余失败是硬门拦下模型自己加核的标签，test 未重跑）；索引阶段候选供给评测已跑一轮（`docs/retrieval-supply.md`：池就是 agent 在 test 里看到的候选，Qwen3.8-Max 判 4,456 对；top-10 严格精确率 0.64 / 宽松 0.94，推荐满足率严格 0.88 / 宽松 0.99，候选充足的任务通过 0.83、不足的 0.77）。
 下一步：真实感请求集与新任务类型（书内问答、追问、澄清）、推荐质量 judge；按需建全书段落索引。
