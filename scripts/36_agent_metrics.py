@@ -29,6 +29,7 @@ def main(
     tasks: list[Path] = typer.Option(...),
     density_path: Path = typer.Option(DEFAULT_DENSITY_PATH),
     digests: Path = typer.Option(DEFAULT_DIGEST_PATH, help="Digest table; read only when the task files contain book_qa tasks."),
+    supply: Path | None = typer.Option(None, help="JSON {task_id: true|false} from the index-stage evaluation; adds pass rates conditioned on candidate supply."),
 ) -> None:
     paths = RunPaths(run_dir=PROJECT_ROOT / "eval" / "agent" / "runs" / run_id, local_dir=DATA_DIR / "eval_runs" / run_id)
     trajectories, memory_states = load_run(paths)
@@ -39,6 +40,7 @@ def main(
     densities = load_density_table(density_path)
     qa_ids = {str(s.get("expect", {}).get("novel_id", "")) for t in task_index.values() if t.get("kind") == "book_qa" for s in t.get("sessions", [])}
     books = load_digest_books(digests, ids=qa_ids) if qa_ids else {}
+    feasible = {str(k): bool(v) for k, v in json.loads(supply.read_text(encoding="utf-8")).items()} if supply else None
     rows = []
     for task_id, trajs in by_task.items():
         task = task_index.get(task_id)
@@ -46,7 +48,7 @@ def main(
             console.print(f"[yellow]skip {task_id}: not in the task files[/yellow]")
             continue
         trajs.sort(key=lambda t: int(t["metadata"].get("session", 0)))
-        rows.append(score_task(task, trajs, memory_states.get(task_id, [{}] * len(trajs)), densities, digests=books))
+        rows.append(score_task(task, trajs, memory_states.get(task_id, [{}] * len(trajs)), densities, digests=books, supply=feasible))
     summary = aggregate(rows)
     (paths.run_dir / "rows.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
     (paths.run_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

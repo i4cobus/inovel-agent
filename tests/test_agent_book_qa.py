@@ -75,8 +75,9 @@ def test_book_qa_tasks_cycle_variants_with_gold_from_the_digest() -> None:
     assert synthesize_book_qa(fake_books(), 10, seed=3)[4].sessions[0].user_message == tasks[4].sessions[0].user_message
 
 
-def trajectory(answer: str, citations: list[dict[str, str]], asked: str = "id00", termination: str = "finish") -> dict[str, Any]:
-    steps = [{"tool_calls": [{"name": "ask_book", "arguments": {"novel_id": asked, "question": "q"}}], "observations": [], "prompt_tokens": 10, "completion_tokens": 5}]
+def trajectory(answer: str, citations: list[dict[str, str]], asked: str = "id00", termination: str = "finish", returned: tuple[str, ...] = ("第240章 中段240", "第120章 中段120")) -> dict[str, Any]:
+    observation = {"tool": "ask_book", "arguments": {"novel_id": asked, "question": "q"}, "result": {"passages": [{"chapter": c, "kind": "middle", "text": "…"} for c in returned]}}
+    steps = [{"tool_calls": [{"name": "ask_book", "arguments": {"novel_id": asked, "question": "q"}}], "observations": [observation], "prompt_tokens": 10, "completion_tokens": 5}]
     return {"termination": termination, "final_answer": answer, "structured": {"recommendations": [], "citations": citations}, "steps": steps}
 
 
@@ -162,3 +163,12 @@ def test_search_books_puts_the_named_book_first() -> None:
     assert result["results"][0]["title_match"] is True and result["results"][0]["title"] == "《凡人修仙传》"
     plain = registry.call("search_books", {"query": "热血玄幻", "k": 2})
     assert [r["novel_id"] for r in plain["results"]] == ["b", "a"] and "title_match" not in plain["results"][0]
+
+
+def test_a_gold_chapter_the_tool_never_returned_is_attributed_to_retrieval_not_the_model() -> None:
+    chapters = fake_books(1)["id00"]["chapters"]
+    expect = {"novel_id": "id00", "answerable": True, "gold_chapters": ["第240章 中段240"]}
+    row = score_qa_session(trajectory("只找到别的章节。", [], returned=("第120章 中段120",)), expect, chapters)
+    assert row["labels"] == ["chapter_not_retrieved"] and row["gold_retrieved"] is False and row["gold_cited"] is None
+    invented = score_qa_session(trajectory("编的。", [{"novel_id": "id00", "chapter": "第999章"}], returned=("第120章 中段120",)), expect, chapters)
+    assert invented["labels"] == ["ungrounded_citation", "chapter_not_retrieved"]

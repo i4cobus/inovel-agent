@@ -93,6 +93,51 @@ def _is_requested(term: str, forms: set[str]) -> bool:
     return bool(term) and any(term == f or term in f or f in term for f in forms)
 
 
+# A checked term that is a paraphrase or a neighbour of a requested one (修仙 → 修真 / 灵气 / 飞升) is an
+# "expansion": a redundant call, not an invented condition. Everything else unrequested is off-topic.
+RELATED_TERMS: dict[str, frozenset[str]] = {
+    "修仙": frozenset({"修真", "灵气", "飞升", "修炼", "修士", "仙侠", "修仙者"}),
+    "修真": frozenset({"修仙", "灵气", "飞升", "修炼", "修士"}),
+    "变身": frozenset({"性转", "变成女人", "女体化", "变女", "伪娘", "女装"}),
+    "穿越": frozenset({"重生", "现代", "前世", "穿书", "异世界", "穿越者", "穿越重生"}),
+    "重生": frozenset({"穿越", "前世", "重来", "回到过去", "穿越重生"}),
+    "系统": frozenset({"金手指", "外挂", "系统流", "面板", "任务奖励"}),
+    "金手指": frozenset({"系统", "外挂", "随身空间", "面板"}),
+    "直播": frozenset({"直播间", "主播", "弹幕"}),
+    "异能": frozenset({"超能力", "超能", "异能者"}),
+    "超能力": frozenset({"异能", "超能"}),
+    "僵尸": frozenset({"丧尸", "尸", "末世"}),
+    "丧尸": frozenset({"僵尸", "末世"}),
+    "兽人": frozenset({"兽族", "兽化", "妖兽"}),
+    "机甲": frozenset({"机器人", "机械", "高达"}),
+    "后宫": frozenset({"多女主", "种马"}),
+    "种马": frozenset({"后宫", "多女主"}),
+}
+
+
+def unrequested_split(trajectory: Mapping[str, Any], requested: Iterable[str]) -> tuple[int, int]:
+    """(expansion, off_topic) counts of check_term / check_trope calls on terms nobody asked for; see unrequested_checks."""
+
+    forms = _requested_forms(requested)
+    related: set[str] = set()
+    for term in requested:
+        related.update(RELATED_TERMS.get(str(term).strip(), ()))
+    expansion = off_topic = 0
+    checked: list[str] = []
+    for args in tool_calls(trajectory, "check_term"):
+        checked.extend(str(t) for t in (args.get("terms") or []))
+    for args in tool_calls(trajectory, "check_trope"):
+        checked.append(str(args.get("trope", "")))
+    for term in checked:
+        if _is_requested(term, forms):
+            continue
+        if any(term.strip() == r or term.strip() in r or r in term.strip() for r in related):
+            expansion += 1
+        else:
+            off_topic += 1
+    return expansion, off_topic
+
+
 def unrequested_checks(trajectory: Mapping[str, Any], requested: Iterable[str]) -> int:
     """check_term / check_trope calls on a term nobody asked for: neither a negative of the session (task
     negatives plus what memory held), nor a surface form of one (the synonym table, or a string that contains
@@ -133,6 +178,8 @@ class SessionScore:
     violation_rate: float | None
     unchecked_rate: float | None
     unrequested_checks: int = 0
+    unrequested_expansion: int = 0
+    unrequested_offtopic: int = 0
     labels: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -184,6 +231,7 @@ def score_session(
     if recs and ((term_cov is not None and term_cov < 1.0) or (trope_cov is not None and trope_cov < 1.0)):
         labels.append("tool_skipped")
 
+    expansion, off_topic = unrequested_split(trajectory, [*negatives_in_text, *negatives_meta, *remembered])
     return SessionScore(
         termination=termination,
         steps=len(trajectory.get("steps", [])),
@@ -197,6 +245,8 @@ def score_session(
         violation_rate=violation,
         unchecked_rate=unchecked,
         unrequested_checks=unrequested_checks(trajectory, [*negatives_in_text, *negatives_meta, *remembered]),
+        unrequested_expansion=expansion,
+        unrequested_offtopic=off_topic,
         labels=labels,
     )
 
@@ -269,8 +319,27 @@ def answer_support(answer: str, sources: Iterable[str], exclude: str = "") -> fl
     return round(sum(1 for g in grams if g in pool) / len(grams), 4)
 
 
+def retrieved_chapters(trajectory: Mapping[str, Any], novel_id: str) -> list[str]:
+    """Chapter headings ask_book returned for ``novel_id`` in this session (the redacted trajectory keeps them)."""
+
+    out: list[str] = []
+    for step in trajectory.get("steps", []):
+        for obs in step.get("observations", []):
+            if obs.get("tool") != "ask_book" or str((obs.get("arguments") or {}).get("novel_id", "")) != novel_id:
+                continue
+            result = obs.get("result") or {}
+            for passage in result.get("passages") or []:
+                if isinstance(passage, dict) and passage.get("chapter"):
+                    out.append(str(passage["chapter"]))
+    return out
+
+
 def score_qa_session(trajectory: Mapping[str, Any], expect: Mapping[str, Any], chapters: list[tuple[str, str, str]], user_message: str = "") -> dict[str, Any]:
-    """One book_qa session. ``chapters`` are the digest's (kind, heading, text) for the gold book."""
+    """One book_qa session. ``chapters`` are the digest's (kind, heading, text) for the gold book.
+
+    Attribution: when ask_book never surfaced a gold chapter the session is labelled ``chapter_not_retrieved`` (the
+    tool's limit, no chapter lookup exists) and the model-side citation labels are not applied; only inventing a
+    chapter (``ungrounded_citation``) still counts against the model."""
 
     termination = str(trajectory.get("termination", ""))
     labels: list[str] = []
@@ -307,7 +376,13 @@ def score_qa_session(trajectory: Mapping[str, Any], expect: Mapping[str, Any], c
     gold_cited: bool | None = None
     support: float | None = None
     abstained: bool | None = None
+    gold_retrieved: bool | None = None
     if answerable:
+        seen = retrieved_chapters(trajectory, novel_id)
+        gold_retrieved = any(match_chapter(c, g) for c in seen for g in gold)
+    if answerable and not gold_retrieved:
+        labels.append("chapter_not_retrieved")
+    elif answerable:
         if not citations:
             labels.append("no_citation")
         gold_cited = any(any(match_chapter(c, g) for g in gold) for _, c in citations)
@@ -330,6 +405,7 @@ def score_qa_session(trajectory: Mapping[str, Any], expect: Mapping[str, Any], c
         "resolved": resolved,
         "n_citations": len(citations),
         "citations_grounded": all_grounded if citations else None,
+        "gold_retrieved": gold_retrieved,
         "gold_cited": gold_cited,
         "answer_support": support,
         "abstained": abstained,
@@ -374,6 +450,7 @@ def score_task(
     memory_states: list[Mapping[str, Any]],
     densities: Mapping[str, Mapping[str, float]],
     digests: Mapping[str, Mapping[str, Any]] | None = None,
+    supply: Mapping[str, bool] | None = None,
 ) -> dict[str, Any]:
     """One row per task: per-session scores, memory checks, and the task-level pass flag."""
 
@@ -432,6 +509,7 @@ def score_task(
         "variant": task.get("variant", ""),
         "split": task.get("split", ""),
         "pass": passed,
+        "supply_feasible": (supply or {}).get(str(task["task_id"])),  # from the index-stage evaluation; None until it has run
         "labels": sorted(set(labels)),
         "sessions": rows,
         "steps": sum(r["steps"] for r in rows),
@@ -441,6 +519,18 @@ def score_task(
     }
 
 
+def wilson(successes: int, n: int, z: float = 1.96) -> tuple[float, float] | None:
+    """95% Wilson score interval for a proportion; None when n is 0."""
+
+    if n <= 0:
+        return None
+    p = successes / n
+    denom = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / denom
+    return round(max(0.0, centre - half), 4), round(min(1.0, centre + half), 4)
+
+
 def aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
     """Pass rates and label counts, overall and per kind / variant."""
 
@@ -448,6 +538,7 @@ def aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
         if not subset:
             return {"n": 0}
         session_rows = [s for r in subset for s in r["sessions"]]
+        n_sessions = max(len(session_rows), 1)
         violation = [s["violation_rate"] for s in session_rows if s.get("violation_rate") is not None]
         term_cov = [s["term_coverage"] for s in session_rows if s.get("term_coverage") is not None]
         trope_cov = [s["trope_coverage"] for s in session_rows if s.get("trope_coverage") is not None]
@@ -460,16 +551,25 @@ def aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
         def rate(values: list[Any]) -> float | None:
             return round(sum(1 for v in values if v) / len(values), 4) if values else None
 
+        passed = sum(1 for r in subset if r["pass"])
+        feasible = [r for r in subset if r.get("supply_feasible") is True]
+        short = [r for r in subset if r.get("supply_feasible") is False]
         return {
             "n": len(subset),
-            "pass_rate": round(sum(1 for r in subset if r["pass"]) / len(subset), 4),
-            "finish_rate": round(sum(1 for s in session_rows if s["termination"] == "finish") / len(session_rows), 4),
-            "mean_steps_per_session": round(sum(s["steps"] for s in session_rows) / len(session_rows), 2),
-            "mean_prompt_tokens_per_session": round(sum(s["prompt_tokens"] for s in session_rows) / len(session_rows)),
+            "pass_rate": round(passed / len(subset), 4),
+            "pass_ci95": wilson(passed, len(subset)),
+            "pass_rate_supply_ok": round(sum(1 for r in feasible if r["pass"]) / len(feasible), 4) if feasible else None,
+            "n_supply_ok": len(feasible) if feasible or short else None,
+            "pass_rate_supply_short": round(sum(1 for r in short if r["pass"]) / len(short), 4) if short else None,
+            "finish_rate": round(sum(1 for s in session_rows if s["termination"] == "finish") / n_sessions, 4),
+            "mean_steps_per_session": round(sum(s["steps"] for s in session_rows) / n_sessions, 2),
+            "mean_prompt_tokens_per_session": round(sum(s["prompt_tokens"] for s in session_rows) / n_sessions),
             "violation_rate_macro": round(sum(violation) / len(violation), 4) if violation else None,
             "check_term_coverage": round(sum(term_cov) / len(term_cov), 4) if term_cov else None,
             "check_trope_coverage": round(sum(trope_cov) / len(trope_cov), 4) if trope_cov else None,
-            "unrequested_checks_per_session": round(sum(s.get("unrequested_checks", 0) for s in session_rows) / len(session_rows), 2),
+            "unrequested_checks_per_session": round(sum(s.get("unrequested_checks", 0) for s in session_rows) / n_sessions, 2),
+            "unrequested_offtopic_per_session": round(sum(s.get("unrequested_offtopic", 0) for s in session_rows) / n_sessions, 2),
+            "gold_retrieved_rate": rate([s["gold_retrieved"] for s in qa_rows if s.get("gold_retrieved") is not None]) if qa_rows else None,
             "book_resolved_rate": rate([s["resolved"] for s in qa_rows]) if qa_rows else None,
             "citation_grounded_rate": rate(grounded),
             "gold_cited_rate": rate(gold_cited),
@@ -486,14 +586,24 @@ def aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 def format_summary(summary: Mapping[str, Any]) -> str:
-    columns = ["n", "pass_rate", "finish_rate", "mean_steps_per_session", "mean_prompt_tokens_per_session", "violation_rate_macro", "check_term_coverage", "check_trope_coverage", "unrequested_checks_per_session"]
+    columns = ["n", "pass_rate", "finish_rate", "mean_steps_per_session", "mean_prompt_tokens_per_session", "violation_rate_macro", "check_term_coverage", "check_trope_coverage", "unrequested_checks_per_session", "unrequested_offtopic_per_session"]
+    if summary["overall"].get("n_supply_ok") is not None:
+        columns += ["pass_rate_supply_ok", "pass_rate_supply_short"]
     if any(summary["overall"].get(c) is not None for c in ("book_resolved_rate", "citation_grounded_rate", "gold_cited_rate", "answer_support_mean", "abstain_rate")):
-        columns += ["book_resolved_rate", "citation_grounded_rate", "gold_cited_rate", "answer_support_mean", "abstain_rate"]
+        columns += ["book_resolved_rate", "gold_retrieved_rate", "citation_grounded_rate", "gold_cited_rate", "answer_support_mean", "abstain_rate"]
+
+    def cell(stats: Mapping[str, Any], column: str) -> str:
+        value = stats.get(column)
+        if column == "pass_rate" and stats.get("pass_ci95"):
+            lo, hi = stats["pass_ci95"]
+            return f"{value} [{lo:.2f}, {hi:.2f}]"
+        return str(value)
+
     lines = ["| group | " + " | ".join(columns) + " |", "|---|" + "---|" * len(columns)]
-    lines.append("| overall | " + " | ".join(str(summary["overall"].get(c)) for c in columns) + " |")
+    lines.append("| overall | " + " | ".join(cell(summary["overall"], c) for c in columns) + " |")
     for key in ("kind", "variant"):
         for name, stats in summary.get(key, {}).items():
-            lines.append(f"| {key}={name} | " + " | ".join(str(stats.get(c)) for c in columns) + " |")
+            lines.append(f"| {key}={name} | " + " | ".join(cell(stats, c) for c in columns) + " |")
     labels = summary["overall"].get("labels", {})
     if labels:
         lines.append("")
