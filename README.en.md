@@ -84,8 +84,10 @@ the candidates, or did the agent not follow the procedure?
   were they among the search results, was every negative checked per book, does a
   rule-checkable negative fail) and cross-turn memory (persist / accumulate / one-off), both
   synthesised from templates and vocabularies and split with a fixed seed into test 75 /
-  dev 20. Two dev rounds: Qwen3.8-Flash 0.55 → 0.75, Qwen3.7-Plus 0.30 → 0.70, five fixes in
-  between; Flash is the main model, the local Qwen3.5-9B the comparison arm. On the 75 test
+  dev 20. Four dev rounds: Qwen3.8-Flash 0.55 → 0.75 → 0.80, Qwen3.7-Plus 0.30 → 0.70, eight fixes in
+  between (the last three from the test's attribution: the loop refuses to recommend a book a check
+  marked as violating, remembered exclusions are re-checked like stated ones, a memory write still
+  ends with finish); Flash is the main model, the local Qwen3.5-9B the comparison arm. On the 75 test
   tasks Flash passes 0.867 (finish 0.98, per-book check coverage 0.96 / 0.95) and the local 9B
   arm 0.227 (finish 0.66; it answers in prose instead of calling finish, confuses the two check
   tools and hardly uses memory); `docs/agent-test.md` attributes every failure.
@@ -125,13 +127,12 @@ Model calls read `INOVELREC_LLM_API_KEY` or `--api-key-file` and the endpoint fr
 `INOVELREC_LLM_BASE_URL`. Development happens on a Mac; card building, index building, agent
 runs and the UI server run on a Windows machine with an RTX 4080.
 
-## Status (2026-10-13)
+## Status (2026-10-26)
 
 Done: digest v2, book cards v3.2, the 4B multi-vector and pooled single-vector indexes, the
 agent layer reworked for natural-language conversation, two dev rounds and the model choice, the
-Flash-versus-9B comparison on the test split, the multi-session web UI running against the real index.
-In progress: the first candidate-supply evaluation on the 4B index; three
-prompt fixes the test exposed (a book the check marks as violating is not recommended, remembered
-exclusions are re-checked before recommending, a memory-only turn still ends with finish).
+Flash-versus-9B comparison on the test split, the three fixes the test asked for verified on dev, the
+multi-session web UI running against the real index.
+In progress: the first candidate-supply evaluation on the 4B index.
 Next: a realistic request set and new task types (in-book QA, follow-ups, clarification), a
 recommendation-quality judge; a build-on-demand full-book passage index.

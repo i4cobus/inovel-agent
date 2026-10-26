@@ -61,6 +61,8 @@ test 的规则：每个模型配置只跑一次，跑前不改提示；本轮之
 
 ## 要改的
 
+（1–3 已于 2026-10-26 落地并在 dev 上验证：dev 0.75 → 0.80，逐本核查覆盖 0.88 / 0.89 → 0.98 / 0.96，过程见 `docs/agent-dev-rounds.md` 第三、四轮。第 4 项未动。）
+
 1. 提示里明确：check_term / check_trope 判为违反的书不许进 recommendations，要换书或说明；两条 constraint_violated 都是核了却照推。
 2. 记忆类任务：提示里加一句「推荐前先看记忆里的不要项，对每本书核查」，dev 上验证后再定。
 3. `mem-016` 那种只写记忆不 finish 的情况，nudge 之后仍没 finish；考虑在 loop 里对「只调了 memory_write 的步」强制追加 finish 提示。
