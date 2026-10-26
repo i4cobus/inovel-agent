@@ -73,9 +73,23 @@ FINISH_SCHEMA: dict[str, Any] = {
     },
 }
 NUDGE = "你刚才没有调用任何工具，也没有用 finish 结束。对话只有调用 finish 才算回答：把你刚才那段话放进 finish 的 answer（需要用户回答时 asks_user=true）；还需要更多信息就调用工具。"
-MEMORY_ONLY_HINT = "记忆已更新。这一步没有检索，直接用 finish 结束这一轮：answer 里确认已记住什么，并问用户现在想看什么（asks_user=true）。"
-MEMORY_ONLY_TOOLS = frozenset({"memory_write", "memory_read", "set_aside"})
+MEMORY_ONLY_HINT = "记忆已写入。如果用户这次只是在陈述偏好、没有要你找书，就直接用 finish 结束：answer 里确认已记住什么，并问他现在想看什么（asks_user=true）。如果他这次还提了找书或问书的要求，继续处理，不要只回一句已记住。"
+MEMORY_ONLY_TOOLS = frozenset({"memory_write", "set_aside"})  # reads do not count: a turn that starts with memory_read is usually a request
 LAST_STEP = "这是最后一步，步数已用尽。现在必须调用 finish，用已经掌握的信息给出最终回答；没能确认的偏好在 answer 里说明。"
+
+
+def _coerce_recommendations(value: Any) -> tuple[list[Any], str | None]:
+    """finish.recommendations as a list of objects; a JSON string holding such a list is accepted (dev-flash-03 rec-064 sent one)."""
+    if value is None or value == "":
+        return [], None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return [], "recommendations 必须是对象数组（每项含 novel_id 和 title），不是字符串；请修正后再次 finish。"
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        return [], "recommendations 必须是对象数组（每项含 novel_id 和 title）；请修正后再次 finish。"
+    return value, None
 
 
 def _note_violation(violations: dict[str, list[str]], tool: str, arguments: dict[str, Any] | None, result: Any) -> None:
@@ -251,13 +265,15 @@ class AgentLoop:
                     observation.error = f"参数不是合法 JSON（如果是回答太长被截断，请精简 answer 后重试）：{call.raw_arguments[:200]}"
                 elif call.name == FINISH_TOOL:
                     answer = str(call.arguments.get("answer", "")).strip()
-                    recs = list(call.arguments.get("recommendations") or [])
+                    recs, recs_error = _coerce_recommendations(call.arguments.get("recommendations"))
                     flagged = [
                         r for r in recs
                         if isinstance(r, dict) and str(r.get("novel_id")) in violations and str(r.get("novel_id")) not in refused_once
                     ] if self.config.refuse_violating_recommendations else []
                     if not answer:
                         observation.error = "finish 缺少 answer"
+                    elif recs_error:
+                        observation.error = recs_error
                     elif flagged:
                         lines = []
                         for r in flagged:
@@ -272,7 +288,7 @@ class AgentLoop:
                         observation.result = {"ok": True}
                         trajectory.final_answer = answer
                         trajectory.structured = {
-                            "recommendations": list(call.arguments.get("recommendations") or []),
+                            "recommendations": recs,
                             "citations": list(call.arguments.get("citations") or []),
                             "asks_user": bool(call.arguments.get("asks_user") or False),
                         }

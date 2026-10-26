@@ -1,0 +1,37 @@
+{
+  "run_id": "dev-flash-03",
+  "split": "dev",
+  "model": "qwen3.8-flash",
+  "reasoning_effort": "none",
+  "max_steps": 10,
+  "index_dir": "C:/CodeRepository/inovel-project/data/index/single_4b",
+  "task_files": [
+    "eval/agent/tasks/constrained_rec.jsonl",
+    "eval/agent/tasks/memory.jsonl"
+  ],
+  "base_url": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+  "extra_body": {
+    "enable_thinking": false
+  },
+  "searcher": "single_4b/dense_single",
+  "profiles": 7655,
+  "cards": 7410,
+  "digest_version": "digest_v2",
+  "index_digest_version": "digest_v2",
+  "density_rows": 7655,
+  "passages": "index:multi_4b",
+  "tools": [
+    "ask_book",
+    "check_term",
+    "check_trope",
+    "get_profile",
+    "memory_read",
+    "memory_write",
+    "search_books",
+    "set_aside",
+    "similar_books"
+  ],
+  "started_at": "2026-10-26T06:57:06.814064+00:00",
+  "tasks": 20,
+  "workers": 6
+}

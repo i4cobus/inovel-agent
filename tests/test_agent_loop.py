@@ -248,5 +248,27 @@ def test_a_memory_only_step_is_followed_by_the_finish_hint_instead_of_the_step_c
     ])
     run = AgentLoop(model, registry_with_checks(), UserMemory(), AgentConfig(max_steps=6)).run("以后都不要穿越")
     last_user = [m for m in model.seen[1] if m["role"] == "user"][-1]["content"]
-    assert last_user.startswith("记忆已更新") and "finish" in last_user
+    assert last_user.startswith("记忆已写入") and "finish" in last_user and "继续处理" in last_user
     assert run.trajectory.termination == "finish" and run.trajectory.structured["asks_user"] is True
+
+
+
+def test_a_memory_read_step_keeps_the_ordinary_step_counter() -> None:
+    registry = registry_with_checks()
+    registry.register(ToolSpec(name="memory_read", description="m", parameters={"type": "object", "properties": {}, "required": []}, handler=lambda: {"negative": []}))
+    model = ScriptedModel([turn(calls=(call("memory_read", {}, "c1"),)), turn(calls=(call("finish", {"answer": "x"}, "f"),))])
+    AgentLoop(model, registry, UserMemory(), AgentConfig(max_steps=6)).run("有没有主角冷静的都市？")
+    last_user = [m for m in model.seen[1] if m["role"] == "user"][-1]["content"]
+    assert last_user.startswith("[系统提示：还剩")
+
+
+def test_recommendations_sent_as_a_json_string_are_parsed_and_other_shapes_are_refused() -> None:
+    as_string = json.dumps([{"novel_id": "n1", "title": "《书》"}], ensure_ascii=False)
+    model = ScriptedModel([
+        turn(calls=(call("finish", {"answer": "推荐", "recommendations": "not json ["}, "f1"),)),
+        turn(calls=(call("finish", {"answer": "推荐", "recommendations": as_string}, "f2"),)),
+    ])
+    traj = AgentLoop(model, registry_with_checks(), UserMemory(), AgentConfig(max_steps=6)).run("x").trajectory
+    assert "对象数组" in traj.steps[0].observations[0].error
+    assert traj.termination == "finish"
+    assert traj.structured["recommendations"] == [{"novel_id": "n1", "title": "《书》"}]
