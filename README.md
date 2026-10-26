@@ -42,7 +42,7 @@
 
 - **agent 阶段**（`src/agent_eval/`、`eval/agent/tasks/`、`docs/agent-dev-rounds.md`）：约束推荐（题材 + 正向特征 + 1–2 个负向：推荐数、是否来自检索结果、每个负向是否逐本核查、规则能判的是否违反）和跨轮记忆（长期 / 累积 / 仅本次：记忆文件与后续推荐）两类，模板加词表合成，固定种子切分；2026-10-27 扩到五类（加会话状态「换几本 / 第二本 / 看过了」和澄清）共 test 307 / dev 85，原 75 / 20 作为子集编号不变（`docs/agent-tasks.md`）。历史数字均在原 75 / 20 上：dev 上四轮：Qwen3.8-Flash 0.55 → 0.75 → 0.80，Qwen3.7-Plus 0.30 → 0.70，中间修了八处（最后三处来自 test 的归因：loop 拒绝推荐核查已判违反的书、记忆里的排除项按当场条件重核、写完记忆也以 finish 结束）；Flash 定为主模型，本地 Qwen3.5-9B 作对照。test 75 条：Flash 通过率 0.867（finish 0.98，逐本核查覆盖 0.96 / 0.95），本地 9B 对照 0.227（finish 0.66，主要败在用文字代替 finish、分不清两个核查工具、不用记忆）；`docs/agent-test.md` 有逐条归因。
 - **索引阶段**（`src/retrieval/supply.py`、`supply_judge.py`、`docs/retrieval-supply.md`）：按 agent 的实际用法评候选供给，查询取 agent 在轨迹里真实发出的检索词，指标是 top-k 正向精确率、可行性（扣掉违反负向的还剩不剩 3 本）、锚点命中、卡一致率、改写鲁棒性，相关性由池化判定加人工校准给出。4B 索引上尚未跑。
-- **书内问答**（`eval/agent/tasks/book_qa.jsonl`、`docs/agent-book-qa.md`）：从 digest 自身出题（指定章节、原句定位、开头、结局、以及 digest 没收录的章节），程序判引用的章节是否真实存在、是否落在 gold 章节上、答案与被引原文的重合度、不可答时有没有如实说未收录。60 条，test 45 / dev 15，尚未跑。
+- **书内问答**（`eval/agent/tasks/book_qa.jsonl`、`docs/agent-book-qa.md`）：从 digest 自身出题（指定章节、原句定位、开头、结局、以及 digest 没收录的章节），程序判引用的章节是否真实存在、是否落在 gold 章节上、答案与被引原文的重合度、不可答时有没有如实说未收录。60 条，test 45 / dev 15；dev 首轮 14/15（找对书 15/15，引用全部真实，未收录章节全部如实拒答）。
 - 当前任务集覆盖「流程对不对」和「引用是不是真的」；真实感请求集、追问与澄清、推荐质量 judge 是下一阶段。
 
 ## 仓库结构
@@ -83,5 +83,5 @@ uv run python scripts/36_agent_metrics.py --run-id dev-01 --tasks eval/agent/tas
 ## 现状（2026-10-27）
 
 已完成：digest v2、书卡 v3.2、4B 多向量索引与池化单向量索引、按自然语言对话改造的 agent 层、两轮 dev 评测与模型选择、test 上 Flash 与 9B 的对照、test 归因出的三处修正并经 dev 验证、多会话网页界面并在真实索引上跑通。
-进行中：扩容后任务集（test 307 / dev 85）的首轮：先 dev 验证新任务类，再跑完整 test；索引阶段候选供给评测在 4B 索引上的首轮（Qwen3.8-Max 判定，agent 真实查询）。
+进行中：扩容后任务集（test 307 / dev 85）：dev 85 条 0.882 已跑，完整 test 待跑；索引阶段候选供给评测在 4B 索引上的首轮（Qwen3.8-Max 判定，agent 真实查询）。
 下一步：真实感请求集与新任务类型（书内问答、追问、澄清）、推荐质量 judge；按需建全书段落索引。

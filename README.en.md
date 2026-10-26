@@ -102,7 +102,7 @@ the candidates, or did the agent not follow the procedure?
   digest itself (a named chapter, locating a quoted line, the opening, the ending, and a chapter the digest
   does not hold); program checks whether every cited chapter exists, whether a citation lands on the gold
   chapter, how much of the answer is found in the cited text, and whether an unanswerable question is
-  declined as such. 60 tasks, test 45 / dev 15, not yet run.
+  declined as such. 60 tasks, test 45 / dev 15; first dev round 14/15 (the book resolved 15/15, every citation real, every out-of-coverage question declined).
 - The task sets cover whether the procedure is followed and whether citations are real; a realistic
   request set, follow-ups and clarification, and a recommendation-quality judge are next.
 
@@ -140,6 +140,6 @@ Done: digest v2, book cards v3.2, the 4B multi-vector and pooled single-vector i
 agent layer reworked for natural-language conversation, two dev rounds and the model choice, the
 Flash-versus-9B comparison on the test split, the three fixes the test asked for verified on dev, the
 multi-session web UI running against the real index.
-In progress: the first round on the extended task sets (dev first, then the full test); the first candidate-supply evaluation on the 4B index (Qwen3.8-Max as judge, the agent's own queries).
+In progress: the extended task sets (test 307 / dev 85): dev 0.882 done, the full test pending; the first candidate-supply evaluation on the 4B index (Qwen3.8-Max as judge, the agent's own queries).
 Next: a realistic request set and new task types (in-book QA, follow-ups, clarification), a
 recommendation-quality judge; a build-on-demand full-book passage index.

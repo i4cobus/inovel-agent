@@ -273,7 +273,10 @@ def memory_labels(expect: Mapping[str, Any], memory_state: Mapping[str, Any]) ->
 # book_qa: the answer must come from the book and the citations must be real chapters.
 
 ANSWER_SUPPORT_THRESHOLD = 0.25  # provisional; calibrate on dev (share of the answer's CJK bigrams found in the cited chapters)
-ABSTAIN_RE = re.compile(r"(未收录|没有收录|不在摘要|摘要(里|中)?(没有|不包含|没收|未)|无法(回答|确认|查到|核实)|没有(找到|查到|看到)(这|那)一?章|不在(收录|可查|覆盖)范围|只收录了|超出(了)?(摘要|收录))")
+ABSTAIN_RE = re.compile(
+    r"(未收录|没有收录|没被收录|不在摘要|摘要(里|中)?(没有|不包含|没收|未)|无法(回答|确认|查到|核实|定位)|没法(告诉|回答|讲|给你讲)|查不到"
+    r"|没有(找到|查到|看到)(这|那)一?章|不在(收录|可查|覆盖|摘要)范围|不在(这些|被)?收录|只(摘要)?收录了|超出(了)?(摘要|收录)|没能定位|没有原文可依据|不想凭.{0,6}猜)"
+)
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 QA_LABELS = ("book_unresolved", "no_citation", "ungrounded_citation", "gold_not_cited", "answer_unsupported", "fabricated_answer")
 
@@ -353,22 +356,29 @@ def score_qa_session(trajectory: Mapping[str, Any], expect: Mapping[str, Any], c
     novel_id = str(expect.get("novel_id", ""))
     answerable = bool(expect.get("answerable", True))
     gold = [str(g) for g in expect.get("gold_chapters", [])]
-    answer = str(trajectory.get("final_answer") or "")
+    raw_answer = trajectory.get("final_answer")
+    answer = raw_answer if isinstance(raw_answer, str) else None  # the redacted file fingerprints it; answer metrics then stay None
     headings = [h for _, h, _ in chapters]
     texts = {h: t for _, h, t in chapters}
 
-    resolved = novel_id in asked_ids(trajectory)
+    profiled = novel_id in {str(c.get("novel_id", "")) for c in tool_calls(trajectory, "get_profile")}
+    resolved = novel_id in asked_ids(trajectory) or profiled  # get_profile carries the blurb and the opening excerpt
     if not resolved:
         labels.append("book_unresolved")
 
+    returned = retrieved_chapters(trajectory, novel_id)  # every heading ask_book returned, blurb and title list included
     citations = cited(trajectory)
     grounded_headings: list[str] = []
     all_grounded = True
     for cited_id, chapter in citations:
-        hit = next((h for h in headings if match_chapter(chapter, h)), None) if cited_id == novel_id else None
+        hit = None
+        if cited_id == novel_id:
+            hit = next((h for h in headings if match_chapter(chapter, h)), None)
+            if hit is None and any(_norm_heading(chapter) == _norm_heading(r) for r in returned):
+                hit = ""  # a real section the tool returned (简介 / 章节目录), just not a chapter
         if hit is None:
             all_grounded = False
-        else:
+        elif hit:
             grounded_headings.append(hit)
     if citations and not all_grounded:
         labels.append("ungrounded_citation")
@@ -378,7 +388,9 @@ def score_qa_session(trajectory: Mapping[str, Any], expect: Mapping[str, Any], c
     abstained: bool | None = None
     gold_retrieved: bool | None = None
     if answerable:
-        seen = retrieved_chapters(trajectory, novel_id)
+        seen = list(returned)
+        if profiled:  # the profile text is the opening, so an opening question can be answered from get_profile alone
+            seen += [h for kind, h, _ in chapters if kind == "opening"]
         gold_retrieved = any(match_chapter(c, g) for c in seen for g in gold)
     if answerable and not gold_retrieved:
         labels.append("chapter_not_retrieved")
@@ -389,10 +401,10 @@ def score_qa_session(trajectory: Mapping[str, Any], expect: Mapping[str, Any], c
         if citations and not gold_cited:
             labels.append("gold_not_cited")
         sources = [texts[h] for h in grounded_headings] or [texts[h] for h in headings if any(match_chapter(h, g) for g in gold)]
-        support = answer_support(answer, sources, exclude=user_message)
+        support = answer_support(answer, sources, exclude=user_message) if answer is not None else None
         if support is not None and support < ANSWER_SUPPORT_THRESHOLD:
             labels.append("answer_unsupported")
-    else:
+    elif answer is not None:
         abstained = bool(ABSTAIN_RE.search(answer))
         if not abstained:
             labels.append("fabricated_answer")

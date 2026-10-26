@@ -188,8 +188,12 @@ def test_runner_writes_redacted_trajectories_and_memory_states_per_task(tmp_path
 
     trajectories, states = load_run(paths)
     assert len(trajectories) == sum(len(t.sessions) for t in tasks)
-    assert all("sha256" in t["final_answer"] for t in trajectories)  # redacted copy
+    assert all(isinstance(t["final_answer"], str) for t in trajectories)  # the full copy is preferred when present
     assert set(states) == {t.task_id for t in tasks}
+    redacted = [json.loads(line) for line in paths.redacted_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert all("sha256" in t["final_answer"] for t in redacted)  # the committed copy still carries only fingerprints
+    paths.full_path.unlink()
+    assert all("sha256" in t["final_answer"] for t in load_run(paths)[0])  # without the full copy, load_run falls back to it
 
     densities = DENSITIES
     rows = [score_task(t.to_dict(), [x for x in trajectories if x["metadata"]["task_id"] == t.task_id], states[t.task_id], densities) for t in tasks]

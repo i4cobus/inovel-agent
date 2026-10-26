@@ -118,9 +118,13 @@ def run_tasks(
 
 
 def load_run(paths: RunPaths) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
-    """Redacted trajectories (one per session) and memory states keyed by task, as written by run_tasks."""
+    """Trajectories (one per session) and memory states keyed by task, as written by run_tasks.
 
-    trajectories = [json.loads(line) for line in paths.redacted_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    The full trajectories are used when they are on this machine (answer-based metrics need the answer text, which
+    the redacted file only fingerprints); otherwise the committed redacted file."""
+
+    source = paths.full_path if paths.full_path.exists() else paths.redacted_path
+    trajectories = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines() if line.strip()]
     memory_states: dict[str, list[dict[str, Any]]] = {}
     states_path = paths.run_dir / "memory_states.jsonl"
     if states_path.exists():
