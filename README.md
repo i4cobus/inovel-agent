@@ -42,7 +42,8 @@
 
 - **agent 阶段**（`src/agent_eval/`、`eval/agent/tasks/`、`docs/agent-dev-rounds.md`）：约束推荐（题材 + 正向特征 + 1–2 个负向：推荐数、是否来自检索结果、每个负向是否逐本核查、规则能判的是否违反）和跨轮记忆（长期 / 累积 / 仅本次：记忆文件与后续推荐）两类，模板加词表合成，固定种子切 test 75 / dev 20。dev 上四轮：Qwen3.8-Flash 0.55 → 0.75 → 0.80，Qwen3.7-Plus 0.30 → 0.70，中间修了八处（最后三处来自 test 的归因：loop 拒绝推荐核查已判违反的书、记忆里的排除项按当场条件重核、写完记忆也以 finish 结束）；Flash 定为主模型，本地 Qwen3.5-9B 作对照。test 75 条：Flash 通过率 0.867（finish 0.98，逐本核查覆盖 0.96 / 0.95），本地 9B 对照 0.227（finish 0.66，主要败在用文字代替 finish、分不清两个核查工具、不用记忆）；`docs/agent-test.md` 有逐条归因。
 - **索引阶段**（`src/retrieval/supply.py`、`supply_judge.py`、`docs/retrieval-supply.md`）：按 agent 的实际用法评候选供给，查询取 agent 在轨迹里真实发出的检索词，指标是 top-k 正向精确率、可行性（扣掉违反负向的还剩不剩 3 本）、锚点命中、卡一致率、改写鲁棒性，相关性由池化判定加人工校准给出。4B 索引上尚未跑。
-- 当前任务集只覆盖「流程对不对」；真实感请求集、书内问答、追问与澄清、推荐质量 judge 是下一阶段。
+- **书内问答**（`eval/agent/tasks/book_qa.jsonl`、`docs/agent-book-qa.md`）：从 digest 自身出题（指定章节、原句定位、开头、结局、以及 digest 没收录的章节），程序判引用的章节是否真实存在、是否落在 gold 章节上、答案与被引原文的重合度、不可答时有没有如实说未收录。60 条，test 45 / dev 15，尚未跑。
+- 当前任务集覆盖「流程对不对」和「引用是不是真的」；真实感请求集、追问与澄清、推荐质量 judge 是下一阶段。
 
 ## 仓库结构
 
@@ -54,9 +55,9 @@
 | `src/agent_eval/` | 任务合成、并发运行、硬指标 |
 | `src/` 其余 | 语料清洗与分章、嵌入与 FAISS、约束规则、证据采样、judge 与校准、transport |
 | `scripts/` | 01–02 语料与 digest；30/30b 建索引与追加书卡段、31 检索基准、32 建书卡、33 池化、34–36 任务合成 / agent 评测 / 指标、37 书卡审阅页、40–43 候选供给评测；`chat.py` 终端对话、`serve.py` 网页服务 |
-| `eval/` | 评测任务集与运行记录、v1 查询与人工标注 |
+| `eval/` | 评测任务集（约束推荐、跨轮记忆、书内问答）与运行记录、v1 查询与人工标注 |
 | `docs/agent-plan.md` | 设计文档：目标、取舍、架构、评测、分期 |
-| `docs/agent-rework.md`、`docs/agent-dev-rounds.md`、`docs/agent-test.md` | agent 层改造说明；两轮 dev 的数字、修正与模型选择；test 结果与逐条归因 |
+| `docs/agent-rework.md`、`docs/agent-dev-rounds.md`、`docs/agent-test.md`、`docs/agent-book-qa.md` | agent 层改造说明；dev 各轮的数字、修正与模型选择；test 结果与逐条归因；书内问答任务集与判分 |
 | `docs/card-schema-v3.md`、`docs/book-cards-pilot.md` | 书卡词表与 prompt 的定稿、试点过程 |
 | `docs/retrieval-supply.md`、`docs/retrieval-bench.md` | 候选供给评测设计；v1 检索基准 |
 | `docs/v1-reranker/` | 前身项目：重排器后训练（SFT + GRPO） |
@@ -82,5 +83,5 @@ uv run python scripts/36_agent_metrics.py --run-id dev-01 --tasks eval/agent/tas
 ## 现状（2026-10-26）
 
 已完成：digest v2、书卡 v3.2、4B 多向量索引与池化单向量索引、按自然语言对话改造的 agent 层、两轮 dev 评测与模型选择、test 上 Flash 与 9B 的对照、test 归因出的三处修正并经 dev 验证、多会话网页界面并在真实索引上跑通。
-进行中：索引阶段候选供给评测在 4B 索引上的首轮。
+进行中：书内问答任务集的首轮（dev 15 条校准阈值，再跑 test）；索引阶段候选供给评测在 4B 索引上的首轮。
 下一步：真实感请求集与新任务类型（书内问答、追问、澄清）、推荐质量 judge；按需建全书段落索引。

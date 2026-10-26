@@ -5,10 +5,13 @@ No model is consulted. Soft metrics (relevance, trope compliance) are the judge'
 
 from __future__ import annotations
 
+import re
+
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
+from src.agent_eval.tasks import chapter_number
 from src.preferences import TERM_SYNONYMS, constraint_violation_from_densities, is_rule_checkable
 
 FAILURE_LABELS = (
@@ -215,7 +218,132 @@ def memory_labels(expect: Mapping[str, Any], memory_state: Mapping[str, Any]) ->
     return labels
 
 
-def score_task(task: Mapping[str, Any], trajectories: list[Mapping[str, Any]], memory_states: list[Mapping[str, Any]], densities: Mapping[str, Mapping[str, float]]) -> dict[str, Any]:
+
+# ---------------------------------------------------------------------------
+# book_qa: the answer must come from the book and the citations must be real chapters.
+
+ANSWER_SUPPORT_THRESHOLD = 0.25  # provisional; calibrate on dev (share of the answer's CJK bigrams found in the cited chapters)
+ABSTAIN_RE = re.compile(r"(未收录|没有收录|不在摘要|摘要(里|中)?(没有|不包含|没收|未)|无法(回答|确认|查到|核实)|没有(找到|查到|看到)(这|那)一?章|不在(收录|可查|覆盖)范围|只收录了|超出(了)?(摘要|收录))")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+QA_LABELS = ("book_unresolved", "no_citation", "ungrounded_citation", "gold_not_cited", "answer_unsupported", "fabricated_answer")
+
+
+def cited(trajectory: Mapping[str, Any]) -> list[tuple[str, str]]:
+    structured = trajectory.get("structured") or {}
+    out = []
+    for item in structured.get("citations") or []:
+        if isinstance(item, dict):
+            out.append((str(item.get("novel_id", "")), str(item.get("chapter", "")).strip()))
+    return out
+
+
+def asked_ids(trajectory: Mapping[str, Any]) -> set[str]:
+    return {str(c.get("novel_id", "")) for c in tool_calls(trajectory, "ask_book")}
+
+
+def _norm_heading(heading: str) -> str:
+    return re.sub(r"\s+", "", heading)
+
+
+def match_chapter(citation: str, heading: str) -> bool:
+    """Same chapter number when both carry one (「第184章」 ≡ 「第184章 龙济光的计划」); else the same text, spaces ignored."""
+
+    a, b = chapter_number(citation), chapter_number(heading)
+    if a is not None and b is not None:
+        return a == b
+    return _norm_heading(citation) == _norm_heading(heading) or (len(citation) >= 4 and _norm_heading(citation) in _norm_heading(heading))
+
+
+def cjk_bigrams(text: str) -> set[str]:
+    chars = "".join(_CJK_RE.findall(text))
+    return {chars[i : i + 2] for i in range(len(chars) - 1)}
+
+
+def answer_support(answer: str, sources: Iterable[str], exclude: str = "") -> float | None:
+    """Share of the answer's CJK bigrams (those not already in the question) that occur in the source texts; None when too short to tell."""
+
+    grams = cjk_bigrams(answer) - cjk_bigrams(exclude)
+    if len(grams) < 8:
+        return None
+    pool = cjk_bigrams("\n".join(sources))
+    return round(sum(1 for g in grams if g in pool) / len(grams), 4)
+
+
+def score_qa_session(trajectory: Mapping[str, Any], expect: Mapping[str, Any], chapters: list[tuple[str, str, str]], user_message: str = "") -> dict[str, Any]:
+    """One book_qa session. ``chapters`` are the digest's (kind, heading, text) for the gold book."""
+
+    termination = str(trajectory.get("termination", ""))
+    labels: list[str] = []
+    if termination != "finish":
+        labels.append("format")
+    if termination == "max_steps":
+        labels.append("budget_exhausted")
+    if termination in ("loop", "model_error"):
+        labels.append(termination)
+
+    novel_id = str(expect.get("novel_id", ""))
+    answerable = bool(expect.get("answerable", True))
+    gold = [str(g) for g in expect.get("gold_chapters", [])]
+    answer = str(trajectory.get("final_answer") or "")
+    headings = [h for _, h, _ in chapters]
+    texts = {h: t for _, h, t in chapters}
+
+    resolved = novel_id in asked_ids(trajectory)
+    if not resolved:
+        labels.append("book_unresolved")
+
+    citations = cited(trajectory)
+    grounded_headings: list[str] = []
+    all_grounded = True
+    for cited_id, chapter in citations:
+        hit = next((h for h in headings if match_chapter(chapter, h)), None) if cited_id == novel_id else None
+        if hit is None:
+            all_grounded = False
+        else:
+            grounded_headings.append(hit)
+    if citations and not all_grounded:
+        labels.append("ungrounded_citation")
+
+    gold_cited: bool | None = None
+    support: float | None = None
+    abstained: bool | None = None
+    if answerable:
+        if not citations:
+            labels.append("no_citation")
+        gold_cited = any(any(match_chapter(c, g) for g in gold) for _, c in citations)
+        if citations and not gold_cited:
+            labels.append("gold_not_cited")
+        sources = [texts[h] for h in grounded_headings] or [texts[h] for h in headings if any(match_chapter(h, g) for g in gold)]
+        support = answer_support(answer, sources, exclude=user_message)
+        if support is not None and support < ANSWER_SUPPORT_THRESHOLD:
+            labels.append("answer_unsupported")
+    else:
+        abstained = bool(ABSTAIN_RE.search(answer))
+        if not abstained:
+            labels.append("fabricated_answer")
+
+    return {
+        "termination": termination,
+        "steps": len(trajectory.get("steps", [])),
+        "prompt_tokens": sum(int(s.get("prompt_tokens", 0)) for s in trajectory.get("steps", [])),
+        "completion_tokens": sum(int(s.get("completion_tokens", 0)) for s in trajectory.get("steps", [])),
+        "resolved": resolved,
+        "n_citations": len(citations),
+        "citations_grounded": all_grounded if citations else None,
+        "gold_cited": gold_cited,
+        "answer_support": support,
+        "abstained": abstained,
+        "labels": labels,
+    }
+
+
+def score_task(
+    task: Mapping[str, Any],
+    trajectories: list[Mapping[str, Any]],
+    memory_states: list[Mapping[str, Any]],
+    densities: Mapping[str, Mapping[str, float]],
+    digests: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
     """One row per task: per-session scores, memory checks, and the task-level pass flag."""
 
     sessions = task["sessions"]
@@ -223,6 +351,14 @@ def score_task(task: Mapping[str, Any], trajectories: list[Mapping[str, Any]], m
     labels: list[str] = []
     for session, trajectory, memory_state in zip(sessions, trajectories, memory_states):
         expect = session.get("expect", {})
+        if task["kind"] == "book_qa":
+            book = (digests or {}).get(str(expect.get("novel_id", "")))
+            if book is None:
+                raise KeyError(f"no digest for {expect.get('novel_id')} (pass the digest table to score book_qa tasks)")
+            row = score_qa_session(trajectory, expect, book["chapters"], user_message=str(session.get("user_message", "")))
+            labels.extend(row["labels"])
+            rows.append(row)
+            continue
         if task["kind"] == "memory":
             # Memory sessions state their own expectations: a one-off constraint must not be demanded of the next
             # session (it fell back to the task-level terms until 2026-10-12, which scored the oneoff variant's second
@@ -264,9 +400,18 @@ def aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
         if not subset:
             return {"n": 0}
         session_rows = [s for r in subset for s in r["sessions"]]
-        violation = [s["violation_rate"] for s in session_rows if s["violation_rate"] is not None]
-        term_cov = [s["term_coverage"] for s in session_rows if s["term_coverage"] is not None]
-        trope_cov = [s["trope_coverage"] for s in session_rows if s["trope_coverage"] is not None]
+        violation = [s["violation_rate"] for s in session_rows if s.get("violation_rate") is not None]
+        term_cov = [s["term_coverage"] for s in session_rows if s.get("term_coverage") is not None]
+        trope_cov = [s["trope_coverage"] for s in session_rows if s.get("trope_coverage") is not None]
+        qa_rows = [s for s in session_rows if "resolved" in s]
+        grounded = [s["citations_grounded"] for s in qa_rows if s.get("citations_grounded") is not None]
+        gold_cited = [s["gold_cited"] for s in qa_rows if s.get("gold_cited") is not None]
+        support = [s["answer_support"] for s in qa_rows if s.get("answer_support") is not None]
+        abstained = [s["abstained"] for s in qa_rows if s.get("abstained") is not None]
+
+        def rate(values: list[Any]) -> float | None:
+            return round(sum(1 for v in values if v) / len(values), 4) if values else None
+
         return {
             "n": len(subset),
             "pass_rate": round(sum(1 for r in subset if r["pass"]) / len(subset), 4),
@@ -277,6 +422,11 @@ def aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
             "check_term_coverage": round(sum(term_cov) / len(term_cov), 4) if term_cov else None,
             "check_trope_coverage": round(sum(trope_cov) / len(trope_cov), 4) if trope_cov else None,
             "unrequested_checks_per_session": round(sum(s.get("unrequested_checks", 0) for s in session_rows) / len(session_rows), 2),
+            "book_resolved_rate": rate([s["resolved"] for s in qa_rows]) if qa_rows else None,
+            "citation_grounded_rate": rate(grounded),
+            "gold_cited_rate": rate(gold_cited),
+            "answer_support_mean": round(sum(support) / len(support), 4) if support else None,
+            "abstain_rate": rate(abstained),
             "labels": dict(Counter(label for r in subset for label in r["labels"])),
         }
 
@@ -289,6 +439,8 @@ def aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
 
 def format_summary(summary: Mapping[str, Any]) -> str:
     columns = ["n", "pass_rate", "finish_rate", "mean_steps_per_session", "mean_prompt_tokens_per_session", "violation_rate_macro", "check_term_coverage", "check_trope_coverage", "unrequested_checks_per_session"]
+    if any(summary["overall"].get(c) is not None for c in ("book_resolved_rate", "citation_grounded_rate", "gold_cited_rate", "answer_support_mean", "abstain_rate")):
+        columns += ["book_resolved_rate", "citation_grounded_rate", "gold_cited_rate", "answer_support_mean", "abstain_rate"]
     lines = ["| group | " + " | ".join(columns) + " |", "|---|" + "---|" * len(columns)]
     lines.append("| overall | " + " | ".join(str(summary["overall"].get(c)) for c in columns) + " |")
     for key in ("kind", "variant"):

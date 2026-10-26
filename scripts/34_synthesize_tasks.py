@@ -15,7 +15,9 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from src.agent_eval.tasks import DEFAULT_TASKS_DIR, assign_splits, save_tasks, synthesize_constrained, synthesize_memory
+from src.agent_eval.tasks import DEFAULT_TASKS_DIR, assign_splits, load_digest_books, save_tasks, synthesize_book_qa, synthesize_constrained, synthesize_memory
+from src.digest import DEFAULT_DIGEST_PATH
+from src.retrieval.cards import DEFAULT_CARDS_PATH
 
 app = typer.Typer(add_completion=False)
 console = Console()
@@ -28,6 +30,10 @@ def main(
     n_dev: int = typer.Option(14),
     mem_test: int = typer.Option(25),
     mem_dev: int = typer.Option(6),
+    qa_test: int = typer.Option(45, help="book_qa tasks in the test split; 0 skips the kind."),
+    qa_dev: int = typer.Option(15),
+    digests: Path = typer.Option(DEFAULT_DIGEST_PATH, help="Digest table the book_qa tasks are generated from."),
+    cards: Path = typer.Option(DEFAULT_CARDS_PATH, help="Only books with a card are used for book_qa."),
     seed: int = typer.Option(20261008),
     oversample: float = typer.Option(2.0, help="Generate this many times the needed constrained tasks before precheck / split."),
     precheck: bool = typer.Option(False, help="Filter constrained tasks by retrieval pool composition (needs index + density table)."),
@@ -42,6 +48,11 @@ def main(
     mem = assign_splits(synthesize_memory(mem_test + mem_dev, seed=seed), mem_test, mem_dev, seed=seed)
     save_tasks(out_dir / "constrained_rec.jsonl", rec)
     save_tasks(out_dir / "memory.jsonl", mem)
+    if qa_test + qa_dev > 0:
+        books = load_digest_books(digests, cards_path=cards)
+        qa = assign_splits(synthesize_book_qa(books, qa_test + qa_dev, seed=seed), qa_test, qa_dev, seed=seed)
+        save_tasks(out_dir / "book_qa.jsonl", qa)
+        typer.echo(f"book_qa: {len(qa)} tasks from {len(books)} books")
     console.print(f"constrained_rec: {len(rec)} ({sum(t.split == 'test' for t in rec)} test)  memory: {len(mem)} ({sum(t.split == 'test' for t in mem)} test)  -> {out_dir}")
 
 

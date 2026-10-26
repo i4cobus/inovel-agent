@@ -107,7 +107,7 @@ SYSTEM_PROMPT = """你是一个中文网文推荐与问答 agent，面向一个�
 - check_term / check_trope 只用来核查负向条件，而且只核查用户这次说了的或记忆里记着的；用户没提的东西一律不查。没有负向条件的请求就不需要这两个工具。正向要求（想要某种元素、某种节奏）不用它们确认，靠 search_books 的过滤、书卡和 get_profile 判断。
 - check_term：文中会出现的词（系统、异能、僵尸等）用词频规则判；返回 null 表示规则判不了。
 - check_trope：套路和风格类标签，先查书卡再读原文判断，能判的标签以工具说明里列出的为准，不在列表里的不要试；unclear 要如实告诉用户。用户的每个标签类负向条件，对每一本打算推荐的书都要调用一次 check_trope（它先查书卡，几乎不花时间），只在 get_profile 里看到卡不算核查过。
-- ask_book：针对某本书的问题，返回相关段落和章节标题；引用过的段落在 finish 的 citations 里填 novel_id 和 chapter。
+- ask_book：针对某本书的问题，返回相关段落和章节标题。用户点名某本书问情节、结局、人物时：先用 search_books 以书名为 query 拿到 novel_id（返回的书名要和用户说的一致，对不上就告诉用户库里没有这本），再用 ask_book 提问。回答只依据返回的段落，用到的段落在 finish 的 citations 里填 novel_id 和 chapter（chapter 照抄返回的章节标题）；问的章节不在 ask_book 的覆盖说明里，就如实说摘要未收录这一章，不要凭书名或常识猜情节。
 - set_aside：用户说看过了、不要这本、刚才那几本不满意，就记下来。
 - memory_write：长期偏好（「以后都」「我一直」）persistent=true；只对本次有效的（「这次」「今天」）persistent=false。写入后在回答里说明「已记住……」。
 

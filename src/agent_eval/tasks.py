@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import random
+import re
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -196,3 +198,188 @@ def assign_splits(tasks: list[Task], n_test: int, n_dev: int, seed: int = 0) -> 
     for position, task in enumerate(keep):
         task.split = "test" if position < n_test else "dev"
     return sorted(keep, key=lambda t: t.task_id)
+
+
+# ---------------------------------------------------------------------------
+# In-book question answering (book_qa): is the answer drawn from the book, and are the citations real?
+#
+# Questions are generated from the digest itself, so the gold is known without a model: a chapter the
+# digest holds (answerable) or a chapter it only lists by title (out of coverage, the agent must say so).
+
+CHAPTER_HEAD_RE = re.compile(r"^第([0-9０-９一二三四五六七八九十百千零〇两]+)[章回节]")
+_CN_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_CN_UNITS = {"十": 10, "百": 100, "千": 1000}
+_CJK_RE = re.compile(r"[一-鿿]")
+
+
+def _chinese_numeral(text: str) -> int | None:
+    total, current = 0, 0
+    for ch in text:
+        if ch in _CN_DIGITS:
+            current = _CN_DIGITS[ch]
+        elif ch in _CN_UNITS:
+            total += (current or 1) * _CN_UNITS[ch]
+            current = 0
+        else:
+            return None
+    return total + current
+
+
+def chapter_number(heading: str) -> int | None:
+    """「第184章 龙济光的计划」→ 184; 「第十二回 …」→ 12; None when the heading has no chapter number."""
+
+    match = CHAPTER_HEAD_RE.match(heading.strip())
+    if not match:
+        return None
+    raw = match.group(1).translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    return int(raw) if raw.isdigit() else _chinese_numeral(raw)
+
+
+def digest_chapters(sections: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
+    """(kind, heading, text) for the whole chapters a digest holds, in digest order."""
+
+    out = []
+    for section in sections:
+        kind = str(section.get("kind", ""))
+        if kind in ("opening", "middle", "ending"):
+            text = str(section.get("text", ""))
+            out.append((kind, text.strip().split("\n", 1)[0].strip(), text))
+    return out
+
+
+def sampled_chapter_titles(sections: list[dict[str, Any]]) -> list[str]:
+    for section in sections:
+        if section.get("kind") == "titles":
+            body = str(section.get("text", "")).split("\n", 1)[-1]
+            return [t.strip() for t in body.split(" / ") if t.strip()]
+    return []
+
+
+def load_digest_books(path: Path, ids: set[str] | None = None, cards_path: Path | None = None) -> dict[str, dict[str, Any]]:
+    """novel_id -> {title, chapters: [(kind, heading, text)], sampled_titles}, streamed from the digest table.
+
+    ``ids`` restricts the result (scoring needs only the books in the task set); ``cards_path`` keeps only
+    books that have a card, so the agent can filter and profile them like any other.
+    """
+
+    import pyarrow.parquet as pq
+
+    with_card: set[str] | None = None
+    if cards_path is not None and cards_path.exists():
+        with_card = {str(x) for x in pq.read_table(cards_path, columns=["novel_id"]).column("novel_id").to_pylist()}
+    books: dict[str, dict[str, Any]] = {}
+    for batch in pq.ParquetFile(path).iter_batches(batch_size=256, columns=["novel_id", "title_guess", "sections_json"]):
+        for record in batch.to_pylist():
+            novel_id = str(record["novel_id"])
+            if ids is not None and novel_id not in ids:
+                continue
+            if with_card is not None and novel_id not in with_card:
+                continue
+            sections = json.loads(str(record.get("sections_json") or "[]"))
+            books[novel_id] = {"title": str(record.get("title_guess") or ""), "chapters": digest_chapters(sections), "sampled_titles": sampled_chapter_titles(sections)}
+    return books
+
+
+def clean_title(title: str) -> str:
+    return title.strip().strip("《》〈〉<>").strip()
+
+
+def eligible_qa_books(books: dict[str, dict[str, Any]], min_chapters: int = 12) -> list[str]:
+    """Books whose digest holds ``min_chapters`` whole chapters, all with a numbered heading, under a unique title."""
+
+    counts = Counter(clean_title(b["title"]) for b in books.values())
+    keep = []
+    for novel_id, book in books.items():
+        title = clean_title(book["title"])
+        chapters = book["chapters"]
+        if len(title) < 3 or counts[title] != 1 or len(chapters) < min_chapters:
+            continue
+        if all(chapter_number(h) is not None for _, h, _ in chapters):
+            keep.append(novel_id)
+    return sorted(keep)
+
+
+def _quote_candidates(chapters: list[tuple[str, str, str]], own: int) -> list[str]:
+    """Narrative lines of chapter ``own`` that appear in no other digest chapter: 16–48 chars, mostly CJK."""
+
+    others = "\n".join(text for i, (_, _, text) in enumerate(chapters) if i != own)
+    out = []
+    for line in chapters[own][2].split("\n")[1:]:
+        line = line.strip()
+        if not 16 <= len(line) <= 48 or "第" in line and "章" in line:
+            continue
+        if len(_CJK_RE.findall(line)) < 0.7 * len(line) or line in others:
+            continue
+        out.append(line)
+    return out
+
+
+QA_TEMPLATES = {
+    "chapter_event": ["《{title}》里「{chapter}」那一章讲了什么？", "《{title}》的「{chapter}」这章发生了什么事？"],
+    "quote_locate": ["《{title}》里有一句「{quote}」，是在哪一章、什么情况下出现的？", "「{quote}」这句话在《{title}》的哪一章？当时发生了什么？"],
+    "opening": ["《{title}》开头讲了什么？主角是谁？", "《{title}》前几章是怎么开场的？"],
+    "ending": ["《{title}》的结局怎么样？", "《{title}》最后是怎么收尾的？"],
+    "out_of_coverage": ["《{title}》里「{chapter}」那一章讲了什么？", "《{title}》的「{chapter}」这章发生了什么事？"],
+}
+QA_VARIANTS = ["chapter_event", "quote_locate", "opening", "ending", "out_of_coverage"]
+
+
+def synthesize_book_qa(books: dict[str, dict[str, Any]], n: int, seed: int = 0, id_prefix: str = "qa") -> list[Task]:
+    """Five variants, cycled. Each task names one book by title and asks one question; the gold chapters come from the digest.
+
+    chapter_event:   a chapter the digest holds, named by its heading. Gold: that chapter.
+    quote_locate:    a line that occurs in exactly one digest chapter. Gold: that chapter.
+    opening/ending:  what happens at the start / how it ends. Gold: any opening / ending chapter.
+    out_of_coverage: a chapter the digest lists by title only. Expected: say so, cite nothing invented.
+    """
+
+    rng = random.Random(seed)
+    pool = eligible_qa_books(books)
+    if len(pool) < n:
+        raise ValueError(f"only {len(pool)} eligible books for {n} tasks")
+    chosen = rng.sample(pool, k=n)
+    tasks: list[Task] = []
+    for index, novel_id in enumerate(chosen):
+        book = books[novel_id]
+        title = clean_title(book["title"])
+        chapters = book["chapters"]
+        variant = QA_VARIANTS[index % len(QA_VARIANTS)]
+        held = {chapter_number(h) for _, h, _ in chapters}
+        meta: dict[str, Any] = {"novel_id": novel_id, "title": title}
+        gold: list[str]
+        answerable = True
+        if variant == "chapter_event":
+            _, heading, _ = rng.choice(chapters)
+            gold, meta["chapter"] = [heading], heading
+            message = rng.choice(QA_TEMPLATES[variant]).format(title=title, chapter=heading)
+        elif variant == "quote_locate":
+            order = list(range(len(chapters)))
+            rng.shuffle(order)
+            picked = next(((i, c) for i in order for c in [_quote_candidates(chapters, i)] if c), None)
+            if picked is None:
+                variant = "chapter_event"
+                _, heading, _ = rng.choice(chapters)
+                gold, meta["chapter"] = [heading], heading
+                message = rng.choice(QA_TEMPLATES[variant]).format(title=title, chapter=heading)
+            else:
+                i, candidates = picked
+                quote = rng.choice(candidates)
+                gold, meta["chapter"], meta["quote"] = [chapters[i][1]], chapters[i][1], quote
+                message = rng.choice(QA_TEMPLATES[variant]).format(title=title, quote=quote)
+        elif variant in ("opening", "ending"):
+            gold = [h for kind, h, _ in chapters if kind == variant]
+            message = rng.choice(QA_TEMPLATES[variant]).format(title=title)
+        else:
+            outside = [t for t in book["sampled_titles"] if chapter_number(t) is not None and chapter_number(t) not in held]
+            if not outside:
+                variant = "chapter_event"
+                _, heading, _ = rng.choice(chapters)
+                gold, meta["chapter"] = [heading], heading
+                message = rng.choice(QA_TEMPLATES[variant]).format(title=title, chapter=heading)
+            else:
+                heading = rng.choice(outside)
+                gold, meta["chapter"], answerable = [], heading, False
+                message = rng.choice(QA_TEMPLATES[variant]).format(title=title, chapter=heading)
+        expect = {"novel_id": novel_id, "answerable": answerable, "gold_chapters": gold}
+        tasks.append(Task(task_id=f"{id_prefix}-{index:03d}", kind="book_qa", split="", sessions=[Session(message, expect)], positives=[title], variant=variant, meta=meta))
+    return tasks

@@ -12,6 +12,7 @@ corpus text and how to strip it for the committed trajectories.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Protocol
 
@@ -101,6 +102,37 @@ class TropeJudge(Protocol):
 # ---- tool builders --------------------------------------------------------------------------
 
 
+def _norm_title(text: str) -> str:
+    return re.sub(r"[\s《》〈〉<>「」『』]", "", str(text))
+
+
+def title_index(profiles: ProfileLookup | None) -> dict[str, str]:
+    """normalized title -> novel_id over the profile table; titles shared by several books are left out."""
+
+    rows = getattr(profiles, "rows", None)
+    if not isinstance(rows, dict):
+        return {}
+    seen: dict[str, str | None] = {}
+    for novel_id, row in rows.items():
+        key = _norm_title((row or {}).get("title", ""))
+        if len(key) < 2:
+            continue
+        seen[key] = None if key in seen else str(novel_id)
+    return {k: v for k, v in seen.items() if v}
+
+
+def title_matches(query: str, index: Mapping[str, str], limit: int = 3) -> list[str]:
+    """Books whose title is the query, or (titles of 3+ chars) occurs inside it; longest titles first."""
+
+    q = _norm_title(query)
+    if not q:
+        return []
+    if q in index:
+        return [index[q]]
+    hits = [(len(t), nid) for t, nid in index.items() if len(t) >= 3 and t in q]
+    return [nid for _, nid in sorted(hits, reverse=True)[:limit]]
+
+
 def build_search_books(
     searcher: BookSearcher,
     budget: ContextBudget,
@@ -120,6 +152,8 @@ def build_search_books(
             if full and (full.get("blurb") or full.get("profile")):
                 return synopsis_preview(full.get("blurb") or full["profile"], budget.preview_chars)
         return truncate(str(row.get("profile_text_preview", "")), budget.preview_chars)
+
+    titles = title_index(profiles)
 
     def handler(query: str, k: int = 10, genre: str | None = None, elements: list[str] | None = None, style: list[str] | None = None, exclude_shown: bool = False) -> dict[str, Any]:
         query = str(query).strip()
@@ -151,10 +185,19 @@ def build_search_books(
             rows = searcher.search(query, k + len(avoid))
             if avoid:
                 rows = [row for row in rows if str(row.get("novel_id", "")) not in avoid][:k]
+        # A query that is (or contains) a book's exact title puts that book first: 「《凡人修仙传》结局怎么样」 must not
+        # depend on the embedding landing on the right book (added for the in-book QA tasks, 2026-10-26).
+        matched = [nid for nid in title_matches(query, titles) if (allowed is None or nid in allowed) and nid not in avoid]
+        if matched:
+            by_id = {str(r.get("novel_id", "")): r for r in rows}
+            first = [{**by_id.get(nid, {}), "novel_id": nid, "title_guess": (profiles.get(nid) or {}).get("title", by_id.get(nid, {}).get("title_guess", "")), "score": 1.0, "title_match": True} for nid in matched]
+            rows = (first + [r for r in rows if str(r.get("novel_id", "")) not in set(matched)])[:k]
         out = []
         for row in rows:
             novel_id = str(row.get("novel_id", ""))
             item = {"novel_id": novel_id, "title": str(row.get("title_guess", "")), "preview": preview_for(row), "score": round(float(row.get("score", 0.0)), 4)}
+            if row.get("title_match"):
+                item["title_match"] = True
             if catalog is not None:
                 item["genre"] = catalog.label(novel_id)
             out.append(item)
@@ -178,7 +221,8 @@ def build_search_books(
             "按描述在书库里找书，返回候选的 novel_id、书名、题材、简介片段和相似度。query 是对想要的书的正面描述，用自然语言写清题材、"
             "设定、主角、节奏、基调即可，不要写否定（「不要系统」检索不认，负向条件要在拿到候选后用 check_term / check_trope 核查）。"
             "genre / elements / style 是按书卡做的硬过滤，用户点名了题材、元素或风格时优先用它们而不是靠措辞；没有书卡的书会被过滤掉。"
-            "exclude_shown=true 跳过本次对话已推荐和用户已排除的书（用户说「换几本」时用）。换不同描述可以多搜几次。" + filters
+            "exclude_shown=true 跳过本次对话已推荐和用户已排除的书（用户说「换几本」时用）。换不同描述可以多搜几次。"
+            "query 是某本书的书名（或包含书名）时，这本书排在结果第一位并标 title_match=true，用来定位用户点名的书。" + filters
         ),
         parameters={
             "type": "object",
