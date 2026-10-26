@@ -20,6 +20,9 @@ eval/results/*/*
 !eval/results/*/eval_run_config.json
 !eval/results/retrieval_bench/results.jsonl
 !eval/results/book_cards/*.json
+# candidate-supply pools, verdicts and metrics per agent run are evidence, kept
+!eval/results/retrieval_supply/*
+!eval/results/retrieval_supply/*/*
 eval/manual_judgements.csv
 # Annotation sheets inline raw novel excerpts from the private corpus.
 eval/manual_judgements_sheet.csv

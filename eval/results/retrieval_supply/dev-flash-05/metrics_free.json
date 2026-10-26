@@ -1,0 +1,27 @@
+{
+ "at": "2026-10-26T08:33:46.582210+00:00",
+ "run_id": "dev-flash-05",
+ "source": "data/eval_runs/dev-flash-05/trajectories.jsonl",
+ "k": 10,
+ "queries": 122,
+ "requests": 84,
+ "pairs_seen": 1197,
+ "pairs_recommended": 297,
+ "pairs_to_judge": 1199,
+ "configs": {
+  "agent_seen": {
+   "queries": 122,
+   "anchor_hit@10": null,
+   "anchors": 0,
+   "card_genre_consistency@10": 0.9133,
+   "genre_queries": 76,
+   "card_element_consistency@10": 0.9244,
+   "element_queries": 40,
+   "rewrite_overlap@10": 0.0773,
+   "rewrite_pairs": 87,
+   "density_clean@10": 0.8868,
+   "density_queries": 67,
+   "latency_ms_p50": null
+  }
+ }
+}

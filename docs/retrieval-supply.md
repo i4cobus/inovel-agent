@@ -27,6 +27,35 @@
    - 正向精确率@10：严格 = positive 为 2 的比例，宽松 = ≥1；
    - 可行@10：同时满足正向、无元标签违反、无词频违反的候选 ≥ 3 本的查询比例。
 
+## 2026-10-27 改法：池就是 agent 看到的
+
+上面的「四块」是重跑索引建池的设计；用户 10-27 定了三件事：judge 用 Qwen3.8-Max、不做人工校准（数字标明是模型判定）、
+查询**只用 agent 真实发出的 `search_books`**，不引入改写。既然查询就是轨迹里的，候选也不必重跑索引：
+轨迹里每次 `search_books` 的返回（含 agent 自己加的 genre / elements / style 过滤和 k）就是 agent 当时看到的候选，
+`finish` 的推荐就是它最后给用户的。所以脚本 44 直接从一次 agent 评测的轨迹抽：
+
+- 查询 = 请求会话里的每次 `search_books`（任务类 constrained_rec / memory / session_state；book_qa 的查询是书名定位、clarify 不该搜，都不算）；
+  它的返回按序成为 `agent_seen` 行；会话的推荐成为 `agent_recommended` 行。
+- 同一会话的查询共用 `request_id = task/sN`，judge 按 **(请求, 书)** 判一次，prompt 里给的是用户原话 + 该会话的正向偏好
+  （memory 任务每个请求会话对应 positives 里的一项）+ 元标签负向；词频判定照旧作为已知信息。
+- 同一套判定同时出：索引侧 `positive_precision@10` / `feasible@10`（按查询）、请求可行性（会话看到的全部候选里可用的 ≥ 3，
+  写成 `supply_feasible.json` 给脚本 36 的 `--supply`，做条件化通过率）、agent 侧 **推荐满足率**（`agent_recommended` 里 positive 2 / ≥1 的比例、
+  违反率、全部可用的会话比例，按任务类分）。
+
+放弃的：配置对比（稠密 / BM25 / 融合 / 卡过滤）。那要重跑索引（PC 显卡几分钟）并把对数乘上配置数，judge 费用随之翻倍；
+现在先回答「agent 看到的候选够不够、推荐的书对不对」，配置对比留给脚本 40（代码还在）。
+
+dev-flash-05 冒烟（Mac，零费用）：122 条查询 / 85 个请求会话，agent 的 k 多为 10–15，带 genre 过滤 99 次；
+(请求, 书) 对 1,199，推荐 297 本里 14 本不在看到的候选里（similar_books 来的）；卡题材一致率 0.91、密度清洁率 0.89；
+`41 --dry-run` T1 估 775 token/对，Max 牌价约 ¥17.6。test 307 条按比例约 3,500 对、¥50，是否全判待用户定。
+
+```bash
+uv run python scripts/44_observed_supply.py --run-id test-flash-02                                   # 池 + 免 judge 指标（Mac 可跑）
+uv run python scripts/41_supply_judge.py --pool-dir eval/results/retrieval_supply/test-flash-02 --dry-run
+uv run python scripts/42_supply_metrics.py --pool-dir eval/results/retrieval_supply/test-flash-02 --verdicts .../verdicts_T1_qwen3.8-max.jsonl
+uv run python scripts/36_agent_metrics.py --run-id test-flash-02 --tasks ... --supply eval/results/retrieval_supply/test-flash-02/supply_feasible.json
+```
+
 ## 定下的与未定的
 
 - judge 用 **Qwen3.8-Max**（用户定，不用 Flash）；池 **top-20**；用户标 **100 对**做校准，只标每对的 positive 和各负向是否违反，可行@10 由这两项算出。

@@ -23,7 +23,7 @@ from src.chat_transport import HTTPChatTransport
 from src.config import DEFAULT_OUTPUT_PATH
 from src.judge import BudgetGuard, PricePerMillion
 from src.retrieval.cards import DEFAULT_CARDS_PATH, load_cards
-from src.retrieval.supply import DEFAULT_SUPPLY_RESULTS_DIR, SUPPLY_DEPTH, load_pool, pool_pairs
+from src.retrieval.supply import DEFAULT_SUPPLY_RESULTS_DIR, SUPPLY_DEPTH, SupplyQuery, load_pool, pool_pairs
 from src.retrieval.supply_judge import (
     DEFAULT_SUPPLY_JUDGE_CACHE,
     DEFAULT_SUPPLY_JUDGE_MODEL,
@@ -66,8 +66,11 @@ def main(
     import os
 
     rows, queries = load_pool(pool_dir)
-    by_id = {q.query_id: q for q in queries}
-    pairs = pool_pairs(rows, depth)
+    # pairs are keyed on the judge id: the request (task/sN) for trajectory pools, the query otherwise
+    by_id: dict[str, SupplyQuery] = {}
+    for query in sorted(queries, key=lambda q: q.source == "recommendation"):  # a search query represents its request
+        by_id.setdefault(query.judge_id, query)
+    pairs = pool_pairs(rows, depth, queries)
     if only_source:
         pairs = {pair: title for pair, title in pairs.items() if by_id[pair[0]].source == only_source}
     elif not include_legacy:
@@ -75,7 +78,8 @@ def main(
     keys = sorted(pairs)
     if sample is not None and sample < len(keys):
         keys = random.Random(seed).sample(keys, sample)
-    console.print(f"pairs: {len(keys)} (of {len(pairs)} in the pool at depth {depth}), tier {tier}")
+    requests = {judge_id for judge_id, _ in keys}
+    console.print(f"pairs: {len(keys)} (of {len(pairs)} in the pool at depth {depth}) over {len(requests)} requests, tier {tier}")
 
     novel_ids = {novel_id for _, novel_id in keys}
     card_map = load_cards(cards) if cards.exists() else {}
@@ -93,7 +97,7 @@ def main(
         tasks.append(
             SupplyJudgeTask(
                 query_id=query_id,
-                query=query.query,
+                query=query.judge_text,
                 novel_id=novel_id,
                 title=pairs[(query_id, novel_id)],
                 evidence=evidence_cache[novel_id],

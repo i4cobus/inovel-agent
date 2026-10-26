@@ -55,8 +55,22 @@ class SupplyQuery:
     positives: tuple[str, ...] = ()
     negatives_in_text: tuple[str, ...] = ()
     negatives_meta: tuple[str, ...] = ()
-    source: str = "task"  # task | rewrite | trajectory | legacy
+    source: str = "task"  # task | rewrite | trajectory | legacy | recommendation
     anchors: tuple[str, ...] = ()
+    request_id: str = ""  # the user request this query served (task/sN); queries of one request share one set of verdicts
+    request: str = ""  # the user's message, shown to the judge in place of the query when set
+    kind: str = ""  # task kind (constrained_rec / memory / session_state)
+    filters: tuple[tuple[str, str], ...] = ()  # the tool arguments besides query, as the agent sent them
+
+    @property
+    def judge_id(self) -> str:
+        """The id verdicts are keyed on: the request when known, else the query itself."""
+
+        return self.request_id or self.query_id
+
+    @property
+    def judge_text(self) -> str:
+        return self.request or self.query
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -72,6 +86,10 @@ class SupplyQuery:
             negatives_meta=tuple(data.get("negatives_meta") or ()),
             source=str(data.get("source") or "task"),
             anchors=tuple(data.get("anchors") or ()),
+            request_id=str(data.get("request_id") or ""),
+            request=str(data.get("request") or ""),
+            kind=str(data.get("kind") or ""),
+            filters=tuple((str(k), str(v)) for k, v in (data.get("filters") or ())),
         )
 
 
@@ -173,6 +191,106 @@ def trajectory_queries(paths: Sequence[Path], tasks: Mapping[str, SupplyQuery]) 
     return out
 
 
+# ---------------------------------------------------------------- observed supply (what the agent actually saw)
+
+SEEN_CONFIG = "agent_seen"  # search_books results as the agent received them, filters and k included
+RECOMMENDED_CONFIG = "agent_recommended"  # the books finish() recommended, in order
+REQUEST_KINDS = ("constrained_rec", "memory", "session_state")  # kinds whose sessions carry a preference request
+
+
+def session_positives(task: Mapping[str, Any]) -> dict[int, tuple[str, ...]]:
+    """session index -> the positive preference that session asks for; sessions without a request are absent.
+
+    A session is a request when its expectation carries ``min_recommendations``. Memory tasks list one
+    genre per request session in order (persist S1/S2, accumulate S3, oneoff S1/S2); the other kinds
+    share the task's positives across their sessions (a session_state follow-up refines the same request)."""
+
+    positives = tuple(str(p) for p in task.get("positives") or ())
+    out: dict[int, tuple[str, ...]] = {}
+    requests = [i for i, session in enumerate(task.get("sessions") or []) if int((session.get("expect") or {}).get("min_recommendations", 0)) > 0]
+    for order, index in enumerate(requests):
+        if str(task.get("kind")) == "memory":
+            out[index] = positives[order : order + 1] if order < len(positives) else ()
+        else:
+            out[index] = positives
+    return {i: p for i, p in out.items() if p}
+
+
+def _coerce_recommendations(value: Any) -> list[Mapping[str, Any]]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    return [r for r in value or [] if isinstance(r, Mapping)] if isinstance(value, list) else []
+
+
+def observed_supply(paths: Sequence[Path], tasks: Mapping[str, Mapping[str, Any]]) -> tuple[list[SupplyQuery], list["PoolRow"]]:
+    """Queries and pool rows read straight from the agent's trajectories, no index run.
+
+    For every request session: each ``search_books`` call becomes a query (its arguments kept as
+    filters) whose returned books are the ``agent_seen`` rows in the order returned, and the books the
+    session's ``finish`` recommended become the ``agent_recommended`` rows under a query of source
+    ``recommendation``. All queries of one session share ``request_id`` = ``task/sN``, so one verdict
+    per (request, book) serves the index precision, the feasibility and the recommendation
+    satisfaction at once (2026-10-27: judging the agent's own queries instead of a re-run pool)."""
+
+    queries: list[SupplyQuery] = []
+    rows: list[PoolRow] = []
+    counters: dict[str, int] = defaultdict(int)
+    for path in paths:
+        for record in _read_jsonl(Path(path)):
+            metadata = record.get("metadata") if isinstance(record.get("metadata"), Mapping) else {}
+            task_id = str(metadata.get("task_id") or str(record.get("task_id") or "").split("/s")[0])
+            task = tasks.get(task_id)
+            if task is None or str(task.get("kind")) not in REQUEST_KINDS:
+                continue
+            session = int(metadata.get("session", 0) or 0)
+            positives = session_positives(task).get(session)
+            if not positives:
+                continue
+            in_text, meta = split_negatives(list(task.get("negatives_in_text") or []) + list(task.get("negatives_meta") or []))
+            request_id = f"{task_id}/s{session}"
+            sessions = task.get("sessions") or []
+            request = str((sessions[session] if session < len(sessions) else {}).get("user_message") or record.get("user_message") or "")
+            common = dict(task_id=task_id, positives=positives, negatives_in_text=in_text, negatives_meta=meta, request_id=request_id, request=request, kind=str(task.get("kind")))
+            for step in record.get("steps") or []:
+                for observation in step.get("observations") or []:
+                    if observation.get("tool") != "search_books" or observation.get("error"):
+                        continue
+                    arguments = observation.get("arguments") if isinstance(observation.get("arguments"), Mapping) else {}
+                    query = str(arguments.get("query") or "").strip()
+                    result = observation.get("result") if isinstance(observation.get("result"), Mapping) else {}
+                    results = [r for r in result.get("results") or [] if isinstance(r, Mapping) and r.get("novel_id")]
+                    if not query or not results:
+                        continue
+                    counters[request_id] += 1
+                    query_id = f"{request_id}@{counters[request_id]}"
+                    filters = tuple((str(k), json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v) for k, v in sorted(arguments.items()) if k != "query")
+                    queries.append(SupplyQuery(query_id=query_id, query=query, source="trajectory", filters=filters, **common))
+                    for position, item in enumerate(results, start=1):
+                        rows.append(PoolRow(query_id=query_id, config=SEEN_CONFIG, rank=position, novel_id=str(item["novel_id"]), title=str(item.get("title") or ""), score=float(item.get("score") or 0.0)))
+            structured = record.get("structured") if isinstance(record.get("structured"), Mapping) else {}
+            recommendations = _coerce_recommendations(structured.get("recommendations"))
+            if recommendations:
+                query_id = f"{request_id}@rec"
+                queries.append(SupplyQuery(query_id=query_id, query=request, source="recommendation", **common))
+                for position, item in enumerate(recommendations, start=1):
+                    if item.get("novel_id"):
+                        rows.append(PoolRow(query_id=query_id, config=RECOMMENDED_CONFIG, rank=position, novel_id=str(item["novel_id"]), title=str(item.get("title") or "")))
+    return queries, rows
+
+
+def load_task_records(paths: Sequence[Path]) -> dict[str, dict[str, Any]]:
+    """task_id -> the task record, over the committed task files."""
+
+    out: dict[str, dict[str, Any]] = {}
+    for path in paths:
+        for record in _read_jsonl(Path(path)):
+            out[str(record["task_id"])] = record
+    return out
+
+
 # ---------------------------------------------------------------- pool
 
 
@@ -230,13 +348,17 @@ def load_pool(out_dir: Path) -> tuple[list[PoolRow], list[SupplyQuery]]:
     return rows, queries
 
 
-def pool_pairs(rows: Sequence[PoolRow], depth: int = SUPPLY_DEPTH) -> dict[tuple[str, str], str]:
-    """Distinct (query_id, novel_id) -> title over every config's top-``depth``: the set a judge must label."""
+def pool_pairs(rows: Sequence[PoolRow], depth: int = SUPPLY_DEPTH, queries: Sequence[SupplyQuery] | None = None) -> dict[tuple[str, str], str]:
+    """Distinct (judge id, novel_id) -> title over every config's top-``depth``: the set a judge must label.
 
+    With ``queries`` the key is the query's ``judge_id`` (its request when known), so every query of
+    one request shares its pairs; without them it is the query id."""
+
+    judge_ids = {q.query_id: q.judge_id for q in queries or ()}
     pairs: dict[tuple[str, str], str] = {}
     for row in rows:
         if row.rank <= depth:
-            pairs.setdefault((row.query_id, row.novel_id), row.title)
+            pairs.setdefault((judge_ids.get(row.query_id, row.query_id), row.novel_id), row.title)
     return pairs
 
 
@@ -391,13 +513,13 @@ def judged_metrics(
         judged = total = 0
         for query_id, top in per_query.items():
             query = by_id.get(query_id)
-            if query is None:
+            if query is None or query.source == "recommendation":
                 continue
             labels = []
             ok_strict = ok_lenient = 0
             for row in top:
                 total += 1
-                verdict = verdicts.get((query_id, row.novel_id))
+                verdict = verdicts.get((query.judge_id, row.novel_id))
                 if verdict is None:
                     continue
                 judged += 1
@@ -420,6 +542,100 @@ def judged_metrics(
             "judged_coverage": round(judged / total, 4) if total else None,
         }
     return report
+
+
+def recommendation_metrics(
+    rows: Sequence[PoolRow],
+    queries: Sequence[SupplyQuery],
+    verdicts: Mapping[tuple[str, str], Mapping[str, Any]],
+    densities: Mapping[str, Mapping[str, float]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Per task kind (and overall): how many of the books the agent recommended satisfy the request.
+
+    satisfied_strict = the judge's positive 2, satisfied_lenient = positive >= 1; violation = a meta
+    negative the judge saw or an in-text negative the density rule flags; usable = lenient and no
+    violation. ``sessions_all_usable`` is the share of sessions whose every judged recommendation is
+    usable. Judged coverage says how many recommendations had a verdict at all."""
+
+    by_id = {q.query_id: q for q in queries}
+    groups: dict[str, list[tuple[SupplyQuery, PoolRow]]] = defaultdict(list)
+    for row in rows:
+        if row.config != RECOMMENDED_CONFIG:
+            continue
+        query = by_id.get(row.query_id)
+        if query is None:
+            continue
+        groups["all"].append((query, row))
+        groups[query.kind or "unknown"].append((query, row))
+    report: dict[str, dict[str, Any]] = {}
+    for kind, pairs in groups.items():
+        strict: list[float] = []
+        lenient: list[float] = []
+        violated: list[float] = []
+        usable: list[float] = []
+        per_session: dict[str, list[bool]] = defaultdict(list)
+        judged = 0
+        for query, row in pairs:
+            verdict = verdicts.get((query.judge_id, row.novel_id))
+            if verdict is None:
+                continue
+            judged += 1
+            density = density_violates(densities, row.novel_id, query.negatives_in_text)
+            label = int(verdict.get("positive", 0))
+            bad = density is True or any(bool(v) for v in (verdict.get("violations") or {}).values())
+            strict.append(1.0 if label == 2 else 0.0)
+            lenient.append(1.0 if label >= 1 else 0.0)
+            violated.append(1.0 if bad else 0.0)
+            ok = label >= 1 and not bad
+            usable.append(1.0 if ok else 0.0)
+            per_session[query.judge_id].append(ok)
+        report[kind] = {
+            "recommendations": len(pairs),
+            "judged_coverage": round(judged / len(pairs), 4) if pairs else None,
+            "satisfied_strict": _mean(strict),
+            "satisfied_lenient": _mean(lenient),
+            "violation_rate": _mean(violated),
+            "usable_rate": _mean(usable),
+            "sessions": len(per_session),
+            "sessions_all_usable": _mean([1.0 if all(v) else 0.0 for v in per_session.values()]),
+        }
+    return report
+
+
+def request_feasibility(
+    rows: Sequence[PoolRow],
+    queries: Sequence[SupplyQuery],
+    verdicts: Mapping[tuple[str, str], Mapping[str, Any]],
+    densities: Mapping[str, Mapping[str, float]] | None = None,
+    k: int = SUPPLY_K,
+    needed: int = MIN_FEASIBLE,
+    strict: bool = False,
+) -> dict[str, bool]:
+    """task_id -> did the candidates the agent saw contain ``needed`` usable books for every request session?
+
+    The verdict script 36 conditions the agent's pass rate on (``--supply``). A task is feasible when each
+    of its request sessions had, across the union of its ``agent_seen`` top-``k`` results, at least
+    ``needed`` books the judge accepts (lenient: positive >= 1; strict: 2) with no violation. Sessions
+    without a single judged candidate are left out, and a task with no judged session is absent."""
+
+    by_id = {q.query_id: q for q in queries}
+    usable_by_request: dict[str, set[str]] = defaultdict(set)
+    judged_requests: set[str] = set()
+    for row in rows:
+        query = by_id.get(row.query_id)
+        if row.config != SEEN_CONFIG or row.rank > k or query is None:
+            continue
+        verdict = verdicts.get((query.judge_id, row.novel_id))
+        if verdict is None:
+            continue
+        judged_requests.add(query.judge_id)
+        density = density_violates(densities, row.novel_id, query.negatives_in_text)
+        if candidate_ok(verdict, density, strict=strict):
+            usable_by_request[query.judge_id].add(row.novel_id)
+    tasks_of: dict[str, list[str]] = defaultdict(list)
+    for request_id in judged_requests:
+        tasks_of[request_id.split("/s")[0]].append(request_id)
+    return {task_id: all(len(usable_by_request[r]) >= needed for r in requests) for task_id, requests in sorted(tasks_of.items())}
 
 
 def format_metrics(report: Mapping[str, Mapping[str, Any]]) -> str:
