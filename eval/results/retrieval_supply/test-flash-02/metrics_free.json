@@ -1,0 +1,27 @@
+{
+ "at": "2026-10-26T10:34:28.248679+00:00",
+ "run_id": "test-flash-02",
+ "source": "data/eval_runs/test-flash-02/trajectories.jsonl",
+ "k": 10,
+ "queries": 490,
+ "requests": 312,
+ "pairs_seen": 4436,
+ "pairs_recommended": 1143,
+ "pairs_to_judge": 4456,
+ "configs": {
+  "agent_seen": {
+   "queries": 490,
+   "anchor_hit@10": null,
+   "anchors": 0,
+   "card_genre_consistency@10": 0.9617,
+   "genre_queries": 344,
+   "card_element_consistency@10": 0.8309,
+   "element_queries": 186,
+   "rewrite_overlap@10": 0.103,
+   "rewrite_pairs": 364,
+   "density_clean@10": 0.881,
+   "density_queries": 288,
+   "latency_ms_p50": null
+  }
+ }
+}

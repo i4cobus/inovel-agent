@@ -1,0 +1,612 @@
+{
+  "overall": {
+    "n": 307,
+    "pass_rate": 0.8404,
+    "pass_ci95": [
+      0.7953,
+      0.8771
+    ],
+    "pass_rate_supply_ok": null,
+    "n_supply_ok": null,
+    "pass_rate_supply_short": null,
+    "finish_rate": 0.9932,
+    "mean_steps_per_session": 5.81,
+    "mean_prompt_tokens_per_session": 43031,
+    "violation_rate_macro": 0.0,
+    "check_term_coverage": 0.9413,
+    "check_trope_coverage": 0.9282,
+    "unrequested_checks_per_session": 1.97,
+    "unrequested_offtopic_per_session": 0.96,
+    "gold_retrieved_rate": 0.9714,
+    "book_resolved_rate": 1.0,
+    "citation_grounded_rate": 1.0,
+    "gold_cited_rate": 0.9706,
+    "answer_support_mean": 0.4095,
+    "abstain_rate": 1.0,
+    "labels": {
+      "tool_skipped": 25,
+      "no_recommendation": 20,
+      "budget_exhausted": 2,
+      "format": 3,
+      "recommended_without_asking": 2,
+      "no_clarification": 1,
+      "answer_unsupported": 2,
+      "chapter_not_retrieved": 1,
+      "gold_not_cited": 1
+    }
+  },
+  "kind": {
+    "book_qa": {
+      "n": 45,
+      "pass_rate": 0.9333,
+      "pass_ci95": [
+        0.8214,
+        0.9771
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 4.47,
+      "mean_prompt_tokens_per_session": 33033,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 0.0,
+      "unrequested_offtopic_per_session": 0.0,
+      "gold_retrieved_rate": 0.9714,
+      "book_resolved_rate": 1.0,
+      "citation_grounded_rate": 1.0,
+      "gold_cited_rate": 0.9706,
+      "answer_support_mean": 0.4095,
+      "abstain_rate": 1.0,
+      "labels": {
+        "answer_unsupported": 2,
+        "chapter_not_retrieved": 1,
+        "gold_not_cited": 1
+      }
+    },
+    "clarify": {
+      "n": 12,
+      "pass_rate": 0.8333,
+      "pass_ci95": [
+        0.552,
+        0.953
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 2.75,
+      "mean_prompt_tokens_per_session": 11284,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 0.25,
+      "unrequested_offtopic_per_session": 0.25,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {
+        "recommended_without_asking": 2,
+        "no_clarification": 1
+      }
+    },
+    "constrained_rec": {
+      "n": 140,
+      "pass_rate": 0.8143,
+      "pass_ci95": [
+        0.7418,
+        0.87
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 0.9857,
+      "mean_steps_per_session": 7.26,
+      "mean_prompt_tokens_per_session": 55191,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.9651,
+      "check_trope_coverage": 0.9282,
+      "unrequested_checks_per_session": 2.6,
+      "unrequested_offtopic_per_session": 1.02,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {
+        "tool_skipped": 13,
+        "no_recommendation": 14,
+        "budget_exhausted": 2,
+        "format": 2
+      }
+    },
+    "memory": {
+      "n": 60,
+      "pass_rate": 0.7667,
+      "pass_ci95": [
+        0.6456,
+        0.8556
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 0.9929,
+      "mean_steps_per_session": 5.02,
+      "mean_prompt_tokens_per_session": 34585,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.9126,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 2.32,
+      "unrequested_offtopic_per_session": 0.76,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {
+        "tool_skipped": 12,
+        "no_recommendation": 2,
+        "format": 1
+      }
+    },
+    "session_state": {
+      "n": 50,
+      "pass_rate": 0.92,
+      "pass_ci95": [
+        0.8116,
+        0.9685
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 5.87,
+      "mean_prompt_tokens_per_session": 46223,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 1.69,
+      "unrequested_offtopic_per_session": 1.69,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {
+        "no_recommendation": 4
+      }
+    }
+  },
+  "variant": {
+    "accumulate": {
+      "n": 21,
+      "pass_rate": 0.619,
+      "pass_ci95": [
+        0.4088,
+        0.7925
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 0.9841,
+      "mean_steps_per_session": 4.02,
+      "mean_prompt_tokens_per_session": 23964,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.8083,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 0.68,
+      "unrequested_offtopic_per_session": 0.16,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {
+        "tool_skipped": 7,
+        "format": 1,
+        "no_recommendation": 1
+      }
+    },
+    "chapter_event": {
+      "n": 9,
+      "pass_rate": 0.8889,
+      "pass_ci95": [
+        0.565,
+        0.9801
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 3.89,
+      "mean_prompt_tokens_per_session": 26353,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 0.0,
+      "unrequested_offtopic_per_session": 0.0,
+      "gold_retrieved_rate": 0.8889,
+      "book_resolved_rate": 1.0,
+      "citation_grounded_rate": 1.0,
+      "gold_cited_rate": 1.0,
+      "answer_support_mean": 0.4479,
+      "abstain_rate": null,
+      "labels": {
+        "chapter_not_retrieved": 1
+      }
+    },
+    "ending": {
+      "n": 8,
+      "pass_rate": 1.0,
+      "pass_ci95": [
+        0.6756,
+        1.0
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 4.25,
+      "mean_prompt_tokens_per_session": 29063,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 0.0,
+      "unrequested_offtopic_per_session": 0.0,
+      "gold_retrieved_rate": 1.0,
+      "book_resolved_rate": 1.0,
+      "citation_grounded_rate": 1.0,
+      "gold_cited_rate": 1.0,
+      "answer_support_mean": 0.3926,
+      "abstain_rate": null,
+      "labels": {}
+    },
+    "exclude": {
+      "n": 16,
+      "pass_rate": 0.875,
+      "pass_ci95": [
+        0.6398,
+        0.965
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 6.59,
+      "mean_prompt_tokens_per_session": 51476,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 1.91,
+      "unrequested_offtopic_per_session": 1.91,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {
+        "no_recommendation": 2
+      }
+    },
+    "in_text": {
+      "n": 50,
+      "pass_rate": 0.86,
+      "pass_ci95": [
+        0.7381,
+        0.9305
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 7.36,
+      "mean_prompt_tokens_per_session": 56898,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.995,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 4.56,
+      "unrequested_offtopic_per_session": 1.5,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {
+        "no_recommendation": 6,
+        "tool_skipped": 1
+      }
+    },
+    "meta": {
+      "n": 40,
+      "pass_rate": 0.8,
+      "pass_ci95": [
+        0.6524,
+        0.895
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 7.05,
+      "mean_prompt_tokens_per_session": 53617,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": 0.9423,
+      "unrequested_checks_per_session": 0.45,
+      "unrequested_offtopic_per_session": 0.28,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {
+        "tool_skipped": 5,
+        "no_recommendation": 3
+      }
+    },
+    "mixed": {
+      "n": 50,
+      "pass_rate": 0.78,
+      "pass_ci95": [
+        0.6476,
+        0.8725
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 0.96,
+      "mean_steps_per_session": 7.32,
+      "mean_prompt_tokens_per_session": 54744,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.934,
+      "check_trope_coverage": 0.9167,
+      "unrequested_checks_per_session": 2.36,
+      "unrequested_offtopic_per_session": 1.14,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {
+        "tool_skipped": 7,
+        "no_recommendation": 5,
+        "budget_exhausted": 2,
+        "format": 2
+      }
+    },
+    "more": {
+      "n": 19,
+      "pass_rate": 0.8947,
+      "pass_ci95": [
+        0.6861,
+        0.9706
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 6.47,
+      "mean_prompt_tokens_per_session": 53214,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 2.32,
+      "unrequested_offtopic_per_session": 2.32,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {
+        "no_recommendation": 2
+      }
+    },
+    "oneoff": {
+      "n": 16,
+      "pass_rate": 0.875,
+      "pass_ci95": [
+        0.6398,
+        0.965
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 6.12,
+      "mean_prompt_tokens_per_session": 45561,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.9167,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 4.12,
+      "unrequested_offtopic_per_session": 1.72,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {
+        "tool_skipped": 2
+      }
+    },
+    "opening": {
+      "n": 8,
+      "pass_rate": 1.0,
+      "pass_ci95": [
+        0.6756,
+        1.0
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 4.5,
+      "mean_prompt_tokens_per_session": 29043,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 0.0,
+      "unrequested_offtopic_per_session": 0.0,
+      "gold_retrieved_rate": 1.0,
+      "book_resolved_rate": 1.0,
+      "citation_grounded_rate": 1.0,
+      "gold_cited_rate": 1.0,
+      "answer_support_mean": 0.4282,
+      "abstain_rate": null,
+      "labels": {}
+    },
+    "out_of_coverage": {
+      "n": 10,
+      "pass_rate": 1.0,
+      "pass_ci95": [
+        0.7225,
+        1.0
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 4.3,
+      "mean_prompt_tokens_per_session": 30089,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 0.0,
+      "unrequested_offtopic_per_session": 0.0,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": 1.0,
+      "citation_grounded_rate": 1.0,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": 1.0,
+      "labels": {}
+    },
+    "persist": {
+      "n": 23,
+      "pass_rate": 0.8261,
+      "pass_ci95": [
+        0.6286,
+        0.9302
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 5.63,
+      "mean_prompt_tokens_per_session": 41496,
+      "violation_rate_macro": 0.0,
+      "check_term_coverage": 0.9574,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 3.3,
+      "unrequested_offtopic_per_session": 0.91,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {
+        "tool_skipped": 3,
+        "no_recommendation": 1
+      }
+    },
+    "quote_locate": {
+      "n": 10,
+      "pass_rate": 0.8,
+      "pass_ci95": [
+        0.4902,
+        0.9433
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 5.3,
+      "mean_prompt_tokens_per_session": 48358,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 0.0,
+      "unrequested_offtopic_per_session": 0.0,
+      "gold_retrieved_rate": 1.0,
+      "book_resolved_rate": 1.0,
+      "citation_grounded_rate": 1.0,
+      "gold_cited_rate": 0.9,
+      "answer_support_mean": 0.3775,
+      "abstain_rate": null,
+      "labels": {
+        "answer_unsupported": 2,
+        "gold_not_cited": 1
+      }
+    },
+    "refer": {
+      "n": 15,
+      "pass_rate": 1.0,
+      "pass_ci95": [
+        0.7961,
+        1.0
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 4.33,
+      "mean_prompt_tokens_per_session": 31763,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 0.67,
+      "unrequested_offtopic_per_session": 0.67,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {}
+    },
+    "vague": {
+      "n": 12,
+      "pass_rate": 0.8333,
+      "pass_ci95": [
+        0.552,
+        0.953
+      ],
+      "pass_rate_supply_ok": null,
+      "n_supply_ok": null,
+      "pass_rate_supply_short": null,
+      "finish_rate": 1.0,
+      "mean_steps_per_session": 2.75,
+      "mean_prompt_tokens_per_session": 11284,
+      "violation_rate_macro": null,
+      "check_term_coverage": null,
+      "check_trope_coverage": null,
+      "unrequested_checks_per_session": 0.25,
+      "unrequested_offtopic_per_session": 0.25,
+      "gold_retrieved_rate": null,
+      "book_resolved_rate": null,
+      "citation_grounded_rate": null,
+      "gold_cited_rate": null,
+      "answer_support_mean": null,
+      "abstain_rate": null,
+      "labels": {
+        "recommended_without_asking": 2,
+        "no_clarification": 1
+      }
+    }
+  }
+}
