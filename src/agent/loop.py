@@ -22,12 +22,14 @@ Terminations, all recorded on the trajectory:
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from src.agent.context import ContextBudget, build_system_prompt, compact_messages, render_tool_result
 from src.agent.memory import UserMemory
+from src.preferences import IN_TEXT_NEGATIVES, META_LABEL_NEGATIVES, TERM_SYNONYMS, parse_preference_query
 from src.agent.session import SessionState
 from src.agent.tools import ToolError, ToolRegistry
 from src.agent.trajectory import Observation, Step, Trajectory
@@ -107,13 +109,59 @@ def _note_violation(violations: dict[str, list[str]], tool: str, arguments: dict
         violations.setdefault(novel_id, []).append(f"check_trope 判定有「{result.get('trope') or arguments.get('trope')}」")
 
 
+def required_in_text_negatives(user_message: str, memory: UserMemory | None) -> list[str]:
+    """The in-text negative terms (check_term vocabulary) this turn must check on every pick: the ones the
+    user names negatively in this message, plus every term inside a 不要 entry of the memory."""
+
+    found: list[str] = []
+    sources: list[str] = list(parse_preference_query(user_message).negative_terms) + _negative_clauses(user_message)
+    if memory is not None:
+        sources += memory.values("negative")
+    for text in sources:
+        for label in sorted(META_LABEL_NEGATIVES, key=len, reverse=True):
+            text = text.replace(label, " ")  # 恋爱脑 is a trope for check_trope, not the in-text term 恋爱
+        for term in sorted(IN_TEXT_NEGATIVES, key=len, reverse=True):
+            if term in text and term not in found:
+                found.append(term)
+    return found
+
+
+NEGATIVE_MARKERS = ("不要", "不看", "不想看", "不喜欢", "别推", "别来", "别给", "别带", "别有", "排除", "拒绝", "受不了", "讨厌")
+CLAUSE_SPLIT = re.compile(r"[，。；！？,.;!?\n]")
+
+
+def _negative_clauses(text: str) -> list[str]:
+    """Clauses of the message that carry a negative marker (也不要重生的 / 这次不看穿越), which the query parser's
+    token rules miss; a clause is the unit so 「不要太长的，要系统流」 keeps 系统 out."""
+
+    return [clause for clause in CLAUSE_SPLIT.split(text or "") if any(marker in clause for marker in NEGATIVE_MARKERS)]
+
+
+def _note_check(checks: dict[str, set[str]], tool: str, arguments: dict[str, Any] | None) -> None:
+    """Remember which terms check_term was run with for which book."""
+
+    if tool != "check_term" or not arguments:
+        return
+    novel_id = str(arguments.get("novel_id") or "")
+    terms = arguments.get("terms")
+    if novel_id and isinstance(terms, list):
+        checks.setdefault(novel_id, set()).update(str(t).strip() for t in terms)
+
+
+def _covers(checked: set[str], term: str) -> bool:
+    forms = {term} | set(TERM_SYNONYMS.get(term, ()))
+    return any(c == f or c in f or f in c for c in checked for f in forms)
+
+
 def steps_hint(remaining: int) -> str:
     return f"[系统提示：还剩 {remaining} 步]"
 
 
 @dataclass(frozen=True)
 class AgentConfig:
-    max_steps: int = 10
+    # 10 until 2026-10-27; test-flash-02 lost 11 constrained tasks with 1–2 picks after a refused book and 2 at the budget, so
+    # the two guards below now have two more steps to be obeyed in.
+    max_steps: int = 12
     # A finish call carries the whole answer plus the recommendation list; at 1,024 it was truncated in 9 of 58 dev sessions (2026-10-12).
     max_tokens: int = 4096
     budget: ContextBudget = ContextBudget()
@@ -121,6 +169,11 @@ class AgentConfig:
     # evidence restated; the model may swap the book or resubmit (the second attempt is accepted). Test 2026-10-12:
     # rec-069 / rec-081 recommended books check_term had just marked `violates: true`.
     refuse_violating_recommendations: bool = True
+    # A finish whose picks have not all been run through check_term with every in-text negative of this turn (the user's
+    # message plus the memory's 不要 entries, exact term or its synonym) is refused once, naming the (book, term) gaps.
+    # Test 2026-10-27: 25 tool_skipped, 12 of them memory tasks where the model checked a near-synonym (变身 → 魔改,
+    # 修仙 → 玄幻) or checked only part of the picks.
+    require_negative_checks: bool = True
 
 
 @dataclass
@@ -206,6 +259,9 @@ class AgentLoop:
         text_only_streak = 0
         violations: dict[str, list[str]] = {}  # novel_id -> evidence strings from this turn's checks
         refused_once: set[str] = set()
+        checks: dict[str, set[str]] = {}  # novel_id -> terms check_term ran with this turn
+        required_terms = required_in_text_negatives(user_message, self.memory) if self.config.require_negative_checks else []
+        coverage_refused: set[str] = set()
 
         tool_names: dict[str, str] = {}
         for index in range(self.config.max_steps):
@@ -270,6 +326,15 @@ class AgentLoop:
                         r for r in recs
                         if isinstance(r, dict) and str(r.get("novel_id")) in violations and str(r.get("novel_id")) not in refused_once
                     ] if self.config.refuse_violating_recommendations else []
+                    unchecked: list[tuple[dict[str, Any], list[str]]] = []
+                    if required_terms and not recs_error:
+                        for r in recs:
+                            nid = str(r.get("novel_id")) if isinstance(r, dict) else ""
+                            if not nid or nid in coverage_refused:
+                                continue
+                            missing = [t for t in required_terms if not _covers(checks.get(nid, set()), t)]
+                            if missing:
+                                unchecked.append((r, missing))
                     if not answer:
                         observation.error = "finish 缺少 answer"
                     elif recs_error:
@@ -283,6 +348,17 @@ class AgentLoop:
                         observation.error = (
                             "这些书在本轮核查里已判为违反用户的条件，不能这样推荐：\n" + "\n".join(lines)
                             + "\n请换书，或者在 answer 里说明原因后再次 finish；如果核查的其实是用户想要的元素，也请说明后再次 finish。"
+                            "换掉之后不足 3 本，就再 search_books（换一种描述或过滤条件）或 similar_books 补一轮，核查后再交付。"
+                        )
+                    elif unchecked:
+                        lines = []
+                        for r, missing in unchecked:
+                            nid = str(r.get("novel_id"))
+                            coverage_refused.add(nid)
+                            lines.append(f"{r.get('title') or nid}：{'、'.join(missing)}")
+                        observation.error = (
+                            "这些书还没有按用户的负向条件逐本核查过（条件来自用户这次说的和长期记忆里的「不要」项）：\n" + "\n".join(lines)
+                            + "\n请对每本书调用 check_term，terms 里填上面列出的原词（不要换成近义词或别的标签），核完再次 finish；判为违反的换书。"
                         )
                     else:
                         observation.result = {"ok": True}
@@ -304,6 +380,7 @@ class AgentLoop:
                         if self.session is not None and isinstance(observation.result, dict):
                             self.session.note_rows(observation.result.get("results"))
                         _note_violation(violations, call.name, call.arguments, observation.result)
+                        _note_check(checks, call.name, call.arguments)
                     except ToolError as exc:
                         observation.error = str(exc)
                     except Exception as exc:  # noqa: BLE001 - a tool bug must not kill the run

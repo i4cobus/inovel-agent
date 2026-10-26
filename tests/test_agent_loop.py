@@ -211,7 +211,7 @@ def test_finish_recommending_a_book_check_term_marked_violating_is_refused_once_
     model = ScriptedModel([
         turn(calls=(call("check_term", {"novel_id": "bad", "terms": ["重生"]}, "c1"), call("check_term", {"novel_id": "ok", "terms": ["重生"]}, "c2"))),
         turn(calls=(finish_with("bad", "ok"),)),
-        turn(calls=(finish_with("ok", "other"),)),
+        turn(calls=(call("check_term", {"novel_id": "other", "terms": ["重生"]}, "c3"), finish_with("ok", "other"))),
     ])
     run = AgentLoop(model, registry_with_checks(), UserMemory(), AgentConfig(max_steps=6)).run("不要重生")
     traj = run.trajectory
@@ -272,3 +272,50 @@ def test_recommendations_sent_as_a_json_string_are_parsed_and_other_shapes_are_r
     assert "对象数组" in traj.steps[0].observations[0].error
     assert traj.termination == "finish"
     assert traj.structured["recommendations"] == [{"novel_id": "n1", "title": "《书》"}]
+
+
+def test_finish_with_a_pick_not_checked_for_a_memory_negative_is_refused_once_naming_the_gap() -> None:
+    memory = UserMemory()
+    memory.write("negative", "不要穿越题材/设定", persistent=True)
+    memory.write("negative", "带系统的也不看", persistent=True)
+    model = ScriptedModel([
+        turn(calls=(call("check_term", {"novel_id": "a", "terms": ["穿越", "系统"]}, "c1"), call("check_term", {"novel_id": "b", "terms": ["穿越"]}, "c2"))),
+        turn(calls=(finish_with("a", "b", "c"),)),
+        turn(calls=(call("check_term", {"novel_id": "b", "terms": ["任务奖励"]}, "c3"), call("check_term", {"novel_id": "c", "terms": ["穿越", "系统"]}, "c4"))),
+        turn(calls=(finish_with("a", "b", "c"),)),
+    ])
+    traj = AgentLoop(model, registry_with_checks(), memory, AgentConfig(max_steps=8)).run("推荐几本历史。").trajectory
+    refused = traj.steps[1].observations[0].error
+    assert refused is not None and "《b》：系统" in refused and "《c》：穿越、系统" in refused and "《a》" not in refused
+    assert traj.termination == "finish" and traj.step_count == 4
+    assert [r["novel_id"] for r in traj.structured["recommendations"]] == ["a", "b", "c"]  # 任务奖励 is a synonym form of 系统
+
+
+def test_negative_terms_in_the_message_are_required_too_and_a_second_finish_is_accepted_even_unchecked() -> None:
+    model = ScriptedModel([turn(calls=(finish_with("x"),)), turn(calls=(finish_with("x"),))])
+    traj = AgentLoop(model, registry_with_checks(), UserMemory(), AgentConfig(max_steps=6)).run("推荐几本玄幻，不要重生的。").trajectory
+    assert "《x》：重生" in traj.steps[0].observations[0].error
+    assert traj.termination == "finish" and traj.step_count == 2  # refused once per book, then accepted as submitted
+
+
+def test_no_negatives_or_no_picks_never_trigger_the_coverage_refusal_and_it_can_be_switched_off() -> None:
+    model = ScriptedModel([turn(calls=(finish_with("x"),))])
+    assert AgentLoop(model, registry_with_checks(), UserMemory(), AgentConfig(max_steps=6)).run("推荐几本玄幻。").trajectory.step_count == 1
+    model = ScriptedModel([turn(calls=(call("finish", {"answer": "你想看什么题材？", "recommendations": [], "asks_user": True}, "f"),))])
+    assert AgentLoop(model, registry_with_checks(), UserMemory(), AgentConfig(max_steps=6)).run("不要系统的").trajectory.step_count == 1
+    model = ScriptedModel([turn(calls=(finish_with("x"),))])
+    assert AgentLoop(model, registry_with_checks(), UserMemory(), AgentConfig(max_steps=6, require_negative_checks=False)).run("不要系统的").trajectory.step_count == 1
+
+
+def test_required_in_text_negatives_reads_the_message_and_the_memory() -> None:
+    from src.agent.loop import required_in_text_negatives
+
+    memory = UserMemory()
+    memory.write("negative", "不要穿越题材/设定", persistent=True)
+    memory.write("positive", "喜欢系统流", persistent=True)  # a positive entry never becomes a required check
+    assert required_in_text_negatives("推荐几本仙侠，不要后宫，也不要重生的。", memory) == ["重生", "穿越"]
+    assert required_in_text_negatives("来几本都市。", None) == []
+    assert required_in_text_negatives("不要太长的，要系统流的玄幻。", None) == []  # a wanted element in another clause is not a negative
+    assert required_in_text_negatives("这次不看穿越，有系统也行。", None) == ["穿越"]
+    assert required_in_text_negatives("有没有侠义的武侠？别给我带僵尸的，别给我带争霸的。", None) == ["僵尸"]
+    assert required_in_text_negatives("有没有群像的玄幻？排除恋爱脑，不要开局无敌那种。", None) == []  # 恋爱脑 is a trope, not 恋爱
